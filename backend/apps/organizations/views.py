@@ -1,6 +1,6 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
-from .models import Organization, Department, Team
+from .models import Organization, OrganizationMember, Department, Team
 from .serializers import OrganizationSerializer, DepartmentSerializer, TeamSerializer
 
 
@@ -15,7 +15,13 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         ).distinct()
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        org = serializer.save(created_by=self.request.user)
+        # Automatically add the creating user as org_admin
+        OrganizationMember.objects.get_or_create(
+            organization=org,
+            user=self.request.user,
+            defaults={'role': 'org_admin'},
+        )
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):

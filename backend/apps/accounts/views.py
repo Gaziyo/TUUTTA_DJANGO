@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User
-from .serializers import UserSerializer, RegisterSerializer
+from .serializers import UserSerializer, RegisterSerializer, EmailTokenObtainPairSerializer
 
 
 class RegisterView(generics.CreateAPIView):
@@ -20,15 +20,14 @@ class RegisterView(generics.CreateAPIView):
 
         return Response({
             'user': UserSerializer(user).data,
-            'tokens': {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            }
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
         }, status=status.HTTP_201_CREATED)
 
 
 class LoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
+    serializer_class = EmailTokenObtainPairSerializer
 
 
 class LogoutView(generics.GenericAPIView):
@@ -37,7 +36,7 @@ class LogoutView(generics.GenericAPIView):
             refresh_token = request.data.get('refresh')
             token = RefreshToken(refresh_token)
             token.blacklist()
-            return Response(status=status.HTTP_205_RESET_CONTENT)
+            return Response(status=status.HTTP_200_OK)
         except Exception:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 

@@ -1,3 +1,5 @@
+import uuid
+from django.utils.text import slugify
 from rest_framework import serializers
 from .models import Course, CourseModule, Lesson
 
@@ -26,6 +28,9 @@ class CourseModuleSerializer(serializers.ModelSerializer):
 
 
 class CourseSerializer(serializers.ModelSerializer):
+    # slug is optional — auto-generated from title if not provided
+    slug = serializers.SlugField(max_length=500, required=False)
+
     class Meta:
         model = Course
         fields = [
@@ -35,6 +40,12 @@ class CourseSerializer(serializers.ModelSerializer):
             'created_by', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_by', 'published_at', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        if not attrs.get('slug'):
+            base_slug = slugify(attrs.get('title', ''))
+            attrs['slug'] = base_slug or f"course-{uuid.uuid4().hex[:8]}"
+        return attrs
 
 
 class CourseDetailSerializer(CourseSerializer):
