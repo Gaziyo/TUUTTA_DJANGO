@@ -1,0 +1,683 @@
+/**
+ * Report Export Utilities
+ * Functions for exporting LMS reports in various formats
+ */
+
+import { GState, jsPDF } from 'jspdf';
+
+export interface ExportColumn {
+  id: string;
+  label: string;
+  width?: number;
+}
+
+export interface ExportOptions {
+  filename: string;
+  title?: string;
+  subtitle?: string;
+  columns: ExportColumn[];
+  data: Record<string, unknown>[];
+  dateRange?: { start: Date; end: Date };
+  generatedBy?: string;
+}
+
+export interface CertificateTemplateData {
+  orgName: string;
+  orgLogo?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  certificateTitle: string;
+  learnerName: string;
+  courseTitle: string;
+  issuedAt: string;
+  expiresAt?: string | null;
+  certificateNumber: string;
+  verificationUrl: string;
+  courseVersion?: string | number;
+  assessmentScore?: string | number;
+}
+
+export function buildCSVContent(columns: ExportColumn[], data: Record<string, unknown>[]): string {
+  const headers = columns.map(col => `"${col.label}"`).join(',');
+  const rows = data.map(row =>
+    columns.map(col => {
+      const value = row[col.id];
+      const stringValue = value !== null && value !== undefined ? String(value) : '';
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }).join(',')
+  );
+  return [headers, ...rows].join('\n');
+}
+
+export function exportToJSON(filename: string, data: unknown): void {
+  const content = JSON.stringify(data, null, 2);
+  downloadFile(content, `${filename}.json`, 'application/json;charset=utf-8;');
+}
+
+/**
+ * Export data to CSV format
+ */
+export function exportToCSV(options: ExportOptions): void {
+  const { filename, columns, data } = options;
+
+  // Create and trigger download
+  downloadFile(buildCSVContent(columns, data), `${filename}.csv`, 'text/csv;charset=utf-8;');
+}
+
+/**
+ * Export data to Excel-compatible format (CSV with BOM for Excel)
+ */
+export function exportToExcel(options: ExportOptions): void {
+  const { filename, columns, data } = options;
+
+  // Build header
+  const headers = columns.map(col => col.label).join('\t');
+
+  // Build rows (tab-separated for Excel)
+  const rows = data.map(row =>
+    columns.map(col => {
+      const value = row[col.id];
+      return value !== null && value !== undefined ? String(value) : '';
+    }).join('\t')
+  );
+
+  // Add BOM for Excel to recognize UTF-8
+  const BOM = '\uFEFF';
+  const content = BOM + [headers, ...rows].join('\n');
+
+  downloadFile(content, `${filename}.xls`, 'application/vnd.ms-excel;charset=utf-8;');
+}
+
+/**
+ * Export data to HTML (printable format)
+ */
+export function exportToHTML(options: ExportOptions): string {
+  const { title, subtitle, columns, data, dateRange, generatedBy } = options;
+
+  const tableRows = data.map(row => `
+    <tr>
+      ${columns.map(col => `<td>${row[col.id] ?? ''}</td>`).join('')}
+    </tr>
+  `).join('');
+
+  const dateRangeText = dateRange
+    ? `${formatDate(dateRange.start)} - ${formatDate(dateRange.end)}`
+    : '';
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>${title || 'Report'}</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          padding: 20px;
+          color: #1f2937;
+        }
+        .header {
+          margin-bottom: 20px;
+          border-bottom: 2px solid #e5e7eb;
+          padding-bottom: 15px;
+        }
+        .header h1 {
+          margin: 0 0 5px 0;
+          font-size: 24px;
+        }
+        .header .subtitle {
+          color: #6b7280;
+          font-size: 14px;
+        }
+        .meta {
+          font-size: 12px;
+          color: #9ca3af;
+          margin-bottom: 20px;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 14px;
+        }
+        th, td {
+          padding: 10px 12px;
+          text-align: left;
+          border-bottom: 1px solid #e5e7eb;
+        }
+        th {
+          background-color: #f9fafb;
+          font-weight: 600;
+          color: #374151;
+        }
+        tr:hover {
+          background-color: #f9fafb;
+        }
+        .footer {
+          margin-top: 20px;
+          font-size: 12px;
+          color: #9ca3af;
+          text-align: center;
+        }
+        @media print {
+          body { padding: 0; }
+          .no-print { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>${title || 'Report'}</h1>
+        ${subtitle ? `<p class="subtitle">${subtitle}</p>` : ''}
+      </div>
+      <div class="meta">
+        ${dateRangeText ? `<span>Period: ${dateRangeText}</span> | ` : ''}
+        <span>Generated: ${formatDate(new Date())}</span>
+        ${generatedBy ? ` | <span>By: ${generatedBy}</span>` : ''}
+      </div>
+      <table>
+        <thead>
+          <tr>
+            ${columns.map(col => `<th>${col.label}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+      <div class="footer">
+        Generated by Tuutta LMS • ${data.length} records
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+/**
+ * Export to printable PDF (opens print dialog)
+ */
+export function exportToPrint(options: ExportOptions): void {
+  const html = exportToHTML(options);
+
+  // Open in new window and trigger print
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  }
+}
+
+/**
+ * Generate a downloadable PDF using browser's print to PDF
+ */
+export function exportToPDF(options: ExportOptions): void {
+  // For a proper PDF, we'd use a library like jsPDF or html2pdf
+  // For now, we'll use the print dialog which allows saving as PDF
+  exportToPrint(options);
+}
+
+export function createSummaryPdfBlob(options: ExportOptions): Blob {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const title = options.title || 'Report Summary';
+  const subtitle = options.subtitle || '';
+  const dateRange = options.dateRange
+    ? `${formatDate(options.dateRange.start)} - ${formatDate(options.dateRange.end)}`
+    : 'All time';
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text(title, pageWidth / 2, 80, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(12);
+  if (subtitle) {
+    doc.text(subtitle, pageWidth / 2, 102, { align: 'center' });
+  }
+
+  doc.setFontSize(11);
+  doc.text(`Period: ${dateRange}`, 72, 150);
+  doc.text(`Generated: ${formatDate(new Date())}`, 72, 170);
+  doc.text(`Records: ${options.data.length}`, 72, 190);
+
+  if (options.generatedBy) {
+    doc.text(`Generated by: ${options.generatedBy}`, 72, 210);
+  }
+
+  doc.setDrawColor(229, 231, 235);
+  doc.line(72, 230, pageWidth - 72, 230);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text('This summary is part of the compliance export package.', 72, 260);
+
+  return doc.output('blob') as Blob;
+}
+
+export async function createCertificatePdfBlob(
+  certificate: CertificateTemplateData
+): Promise<Blob> {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  const loadImageData = async (url?: string) => {
+    if (!url) return null;
+    try {
+      const response = await fetch(url, { mode: 'cors' });
+      const blob = await response.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('Failed to read logo'));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const primary = certificate.primaryColor || '#4f46e5';
+  const secondary = certificate.secondaryColor || '#0f172a';
+
+  doc.setFillColor(255, 255, 255);
+  doc.rect(24, 24, pageWidth - 48, pageHeight - 48, 'F');
+  doc.setDrawColor(primary);
+  doc.setLineWidth(2);
+  doc.rect(24, 24, pageWidth - 48, pageHeight - 48);
+
+  doc.setDrawColor(secondary);
+  doc.setLineWidth(1);
+  doc.setLineDashPattern([4, 3], 0);
+  doc.rect(44, 44, pageWidth - 88, pageHeight - 88);
+  doc.setLineDashPattern([], 0);
+
+  const logoData = await loadImageData(certificate.orgLogo);
+  const canRenderLogo = Boolean(logoData) && !logoData?.startsWith('data:image/svg');
+  if (logoData && canRenderLogo) {
+    doc.addImage(logoData, 'PNG', 64, 60, 80, 40, undefined, 'FAST');
+  } else {
+    doc.setTextColor(primary);
+    doc.setFont('times', 'bold');
+    doc.setFontSize(48);
+    doc.text('T', 70, 92);
+  }
+
+  if (!canRenderLogo) {
+    doc.setGState(new GState({ opacity: 0.08 }));
+    doc.setTextColor(secondary);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(90);
+    doc.text('TUUTTA', pageWidth / 2, pageHeight / 2 + 40, { align: 'center' });
+    doc.setGState(new GState({ opacity: 1 }));
+  }
+
+  doc.setTextColor(secondary);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text(certificate.orgName, pageWidth - 80, 88, { align: 'right' });
+
+  doc.setTextColor(primary);
+  doc.setFont('times', 'bold');
+  doc.setFontSize(32);
+  doc.text('Certificate of Completion', pageWidth / 2, 150, { align: 'center' });
+
+  doc.setTextColor(secondary);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(16);
+  doc.text(certificate.certificateTitle, pageWidth / 2, 178, { align: 'center' });
+
+  doc.setFontSize(12);
+  doc.text('This certifies that', pageWidth / 2, 230, { align: 'center' });
+
+  doc.setFont('times', 'bold');
+  doc.setFontSize(28);
+  doc.text(certificate.learnerName, pageWidth / 2, 270, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(12);
+  doc.text('has successfully completed', pageWidth / 2, 305, { align: 'center' });
+
+  doc.setFont('times', 'bold');
+  doc.setFontSize(20);
+  doc.text(certificate.courseTitle, pageWidth / 2, 335, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  const dateLine = `Issued: ${certificate.issuedAt}${certificate.expiresAt ? ` • Expires: ${certificate.expiresAt}` : ''}`;
+  doc.text(dateLine, pageWidth / 2, 365, { align: 'center' });
+
+  if (certificate.courseVersion !== undefined || certificate.assessmentScore !== undefined) {
+    const versionText = certificate.courseVersion !== undefined ? `Course Version: ${certificate.courseVersion}` : '';
+    const scoreText = certificate.assessmentScore !== undefined ? `Assessment Score: ${certificate.assessmentScore}%` : '';
+    const metaLine = [versionText, scoreText].filter(Boolean).join(' • ');
+    if (metaLine) {
+      doc.setFontSize(10);
+      doc.text(metaLine, pageWidth / 2, 388, { align: 'center' });
+    }
+  }
+
+  doc.setFontSize(10);
+  doc.setTextColor(secondary);
+  doc.text('Certificate ID', 80, pageHeight - 80);
+  doc.setFont('helvetica', 'bold');
+  doc.text(certificate.certificateNumber, 80, pageHeight - 62);
+
+  doc.setFont('helvetica', 'normal');
+  doc.text('Verify', pageWidth - 220, pageHeight - 80);
+  const wrapped = doc.splitTextToSize(certificate.verificationUrl, 180);
+  doc.text(wrapped, pageWidth - 220, pageHeight - 62);
+
+  return doc.output('blob') as Blob;
+}
+
+/**
+ * Helper to download a file
+ */
+function downloadFile(content: string, filename: string, mimeType: string): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.style.display = 'none';
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Format date for display
+ */
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+}
+
+/**
+ * Generate filename with timestamp
+ */
+export function generateFilename(baseName: string): string {
+  const timestamp = new Date().toISOString().split('T')[0];
+  return `${baseName}-${timestamp}`;
+}
+
+export async function exportCertificatesTemplate(
+  filename: string,
+  certificates: CertificateTemplateData[]
+): Promise<void> {
+  if (!certificates.length) return;
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  const loadImageData = async (url?: string) => {
+    if (!url) return null;
+    try {
+      const response = await fetch(url, { mode: 'cors' });
+      const blob = await response.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('Failed to read logo'));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  for (let i = 0; i < certificates.length; i += 1) {
+    const cert = certificates[i];
+    if (i > 0) doc.addPage();
+
+    const primary = cert.primaryColor || '#4f46e5';
+    const secondary = cert.secondaryColor || '#0f172a';
+
+    doc.setFillColor(255, 255, 255);
+    doc.rect(24, 24, pageWidth - 48, pageHeight - 48, 'F');
+    doc.setDrawColor(primary);
+    doc.setLineWidth(2);
+    doc.rect(24, 24, pageWidth - 48, pageHeight - 48);
+
+    doc.setDrawColor(secondary);
+    doc.setLineWidth(1);
+    doc.setLineDashPattern([4, 3], 0);
+    doc.rect(44, 44, pageWidth - 88, pageHeight - 88);
+    doc.setLineDashPattern([], 0);
+
+    const logoData = await loadImageData(cert.orgLogo);
+    const canRenderLogo = Boolean(logoData) && !logoData?.startsWith('data:image/svg');
+    if (logoData && canRenderLogo) {
+      doc.addImage(logoData, 'PNG', 64, 60, 80, 40, undefined, 'FAST');
+    } else {
+      doc.setTextColor(primary);
+      doc.setFont('times', 'bold');
+      doc.setFontSize(48);
+      doc.text('T', 70, 92);
+    }
+
+    if (!canRenderLogo) {
+      doc.setGState(new GState({ opacity: 0.08 }));
+      doc.setTextColor(secondary);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(90);
+      doc.text('TUUTTA', pageWidth / 2, pageHeight / 2 + 40, { align: 'center' });
+      doc.setGState(new GState({ opacity: 1 }));
+    }
+
+    doc.setTextColor(secondary);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(cert.orgName, pageWidth - 80, 88, { align: 'right' });
+
+    doc.setTextColor(primary);
+    doc.setFont('times', 'bold');
+    doc.setFontSize(32);
+    doc.text('Certificate of Completion', pageWidth / 2, 150, { align: 'center' });
+
+    doc.setTextColor(secondary);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(16);
+    doc.text(cert.certificateTitle, pageWidth / 2, 178, { align: 'center' });
+
+    doc.setFontSize(12);
+    doc.text('This certifies that', pageWidth / 2, 230, { align: 'center' });
+
+    doc.setFont('times', 'bold');
+    doc.setFontSize(28);
+    doc.text(cert.learnerName, pageWidth / 2, 270, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
+    doc.text('has successfully completed', pageWidth / 2, 305, { align: 'center' });
+
+    doc.setFont('times', 'bold');
+    doc.setFontSize(20);
+    doc.text(cert.courseTitle, pageWidth / 2, 335, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    const dateLine = `Issued: ${cert.issuedAt}${cert.expiresAt ? ` • Expires: ${cert.expiresAt}` : ''}`;
+    doc.text(dateLine, pageWidth / 2, 365, { align: 'center' });
+
+    if (cert.courseVersion !== undefined || cert.assessmentScore !== undefined) {
+      const versionText = cert.courseVersion !== undefined ? `Course Version: ${cert.courseVersion}` : '';
+      const scoreText = cert.assessmentScore !== undefined ? `Assessment Score: ${cert.assessmentScore}%` : '';
+      const metaLine = [versionText, scoreText].filter(Boolean).join(' • ');
+      if (metaLine) {
+        doc.setFontSize(10);
+        doc.text(metaLine, pageWidth / 2, 388, { align: 'center' });
+      }
+    }
+
+    doc.setFontSize(10);
+    doc.setTextColor(secondary);
+    doc.text('Certificate ID', 80, pageHeight - 80);
+    doc.setFont('helvetica', 'bold');
+    doc.text(cert.certificateNumber, 80, pageHeight - 62);
+
+    doc.setFont('helvetica', 'normal');
+    doc.text('Verify', pageWidth - 220, pageHeight - 80);
+    const wrapped = doc.splitTextToSize(cert.verificationUrl, 180);
+    doc.text(wrapped, pageWidth - 220, pageHeight - 62);
+  }
+
+  doc.save(`${filename}.pdf`);
+}
+
+// ============ Report-Specific Export Functions ============
+
+/**
+ * Export learner progress report
+ */
+export function exportLearnerProgressReport(
+  learners: {
+    name: string;
+    email: string;
+    department: string;
+    enrollments: number;
+    completed: number;
+    avgProgress: number;
+    avgScore: number;
+    timeSpent: number;
+  }[]
+): void {
+  exportToCSV({
+    filename: generateFilename('learner-progress-report'),
+    columns: [
+      { id: 'name', label: 'Learner Name' },
+      { id: 'email', label: 'Email' },
+      { id: 'department', label: 'Department' },
+      { id: 'enrollments', label: 'Total Enrollments' },
+      { id: 'completed', label: 'Completed' },
+      { id: 'avgProgress', label: 'Avg Progress (%)' },
+      { id: 'avgScore', label: 'Avg Score (%)' },
+      { id: 'timeSpent', label: 'Time Spent (min)' }
+    ],
+    data: learners
+  });
+}
+
+/**
+ * Export course completion report
+ */
+export function exportCourseCompletionReport(
+  courses: {
+    title: string;
+    category: string;
+    enrolled: number;
+    completed: number;
+    inProgress: number;
+    completionRate: number;
+    avgScore: number;
+  }[]
+): void {
+  exportToCSV({
+    filename: generateFilename('course-completion-report'),
+    columns: [
+      { id: 'title', label: 'Course Title' },
+      { id: 'category', label: 'Category' },
+      { id: 'enrolled', label: 'Total Enrolled' },
+      { id: 'completed', label: 'Completed' },
+      { id: 'inProgress', label: 'In Progress' },
+      { id: 'completionRate', label: 'Completion Rate (%)' },
+      { id: 'avgScore', label: 'Avg Score (%)' }
+    ],
+    data: courses
+  });
+}
+
+/**
+ * Export compliance report
+ */
+export function exportComplianceReport(
+  departments: {
+    name: string;
+    learners: number;
+    enrollments: number;
+    completed: number;
+    overdue: number;
+    complianceRate: number;
+    status: string;
+  }[]
+): void {
+  exportToCSV({
+    filename: generateFilename('compliance-report'),
+    columns: [
+      { id: 'name', label: 'Department' },
+      { id: 'learners', label: 'Total Learners' },
+      { id: 'enrollments', label: 'Total Enrollments' },
+      { id: 'completed', label: 'Completed' },
+      { id: 'overdue', label: 'Overdue' },
+      { id: 'complianceRate', label: 'Compliance Rate (%)' },
+      { id: 'status', label: 'Status' }
+    ],
+    data: departments
+  });
+}
+
+/**
+ * Export overdue training report
+ */
+export function exportOverdueReport(
+  overdueItems: {
+    learnerName: string;
+    learnerEmail: string;
+    department: string;
+    courseName: string;
+    dueDate: string;
+    daysOverdue: number;
+    progress: number;
+  }[]
+): void {
+  exportToCSV({
+    filename: generateFilename('overdue-training-report'),
+    columns: [
+      { id: 'learnerName', label: 'Learner Name' },
+      { id: 'learnerEmail', label: 'Email' },
+      { id: 'department', label: 'Department' },
+      { id: 'courseName', label: 'Course' },
+      { id: 'dueDate', label: 'Due Date' },
+      { id: 'daysOverdue', label: 'Days Overdue' },
+      { id: 'progress', label: 'Progress (%)' }
+    ],
+    data: overdueItems
+  });
+}
+
+/**
+ * Export certificate report
+ */
+export function exportCertificateReport(
+  certificates: {
+    learnerName: string;
+    certificateName: string;
+    issuedDate: string;
+    expiryDate: string;
+    status: string;
+  }[]
+): void {
+  exportToCSV({
+    filename: generateFilename('certificate-report'),
+    columns: [
+      { id: 'learnerName', label: 'Learner Name' },
+      { id: 'certificateName', label: 'Certificate' },
+      { id: 'issuedDate', label: 'Issued Date' },
+      { id: 'expiryDate', label: 'Expiry Date' },
+      { id: 'status', label: 'Status' }
+    ],
+    data: certificates
+  });
+}

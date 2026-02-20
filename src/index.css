@@ -1,0 +1,753 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --transition-duration: 300ms;
+    --transition-timing: cubic-bezier(0.4, 0, 0.2, 1);
+    --font-body: 'Manrope', system-ui, -apple-system, sans-serif;
+    --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    --shadow-elevated: 0 18px 60px rgba(15, 10, 25, 0.12);
+    --shadow-soft: 0 12px 32px rgba(15, 10, 25, 0.08);
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-7: 32px;
+    --space-8: 40px;
+    --space-9: 48px;
+    --space-10: 64px;
+    --font-size-1: 12px;
+    --font-size-2: 14px;
+    --font-size-3: 16px;
+    --font-size-4: 18px;
+    --font-size-5: 20px;
+    --font-size-6: 24px;
+    --font-size-7: 28px;
+    --font-size-8: 32px;
+    --line-height-tight: 1.2;
+    --line-height-base: 1.5;
+    --line-height-relaxed: 1.65;
+    /* New Purple Palette - matching provided color scheme */
+    --color-primary: #0f0a19;           /* Dark text - near black with purple tint */
+    --color-secondary: #ddd6fe;         /* Light lavender secondary */
+    --color-bg: #ffffff;                /* White background */
+    --color-surface: #ffffff;           /* White surface */
+    --color-surface-2: #f5f3ff;         /* Very light purple tint */
+    --color-border: rgba(139, 92, 246, 0.2);  /* Purple-tinted border */
+    --color-text: #0f0a19;              /* Dark text */
+    --color-muted: #6b7280;             /* Muted gray */
+    --color-accent: #8b5cf6;            /* Bright violet accent */
+    --color-accent-strong: #5b21b6;     /* Deep purple primary */
+    --color-ai: #8b5cf6;                /* Bright violet for AI elements */
+    --right-panel-width: 20rem;
+    --chat-sidebar-width: 18rem;
+    --chat-sidebar-collapsed: 3rem;
+
+    /* shadcn/ui variables - Purple theme */
+    --background: 0 0% 100%;
+    --foreground: 263 41% 7%;           /* Dark purple-black */
+    --card: 0 0% 100%;
+    --card-foreground: 263 41% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 263 41% 7%;
+    --primary: 263 69% 42%;             /* Deep purple #5b21b6 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 253 91% 92%;           /* Light lavender #ddd6fe */
+    --secondary-foreground: 263 69% 42%;
+    --muted: 253 91% 92%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 258 90% 66%;              /* Bright violet #8b5cf6 */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 253 60% 90%;              /* Light purple border */
+    --input: 253 60% 90%;
+    --ring: 263 69% 42%;                /* Deep purple ring */
+    --radius: 0.5rem;
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    /* Dark mode Purple Palette */
+    --color-primary: #f5f3ff;           /* Light text in dark mode */
+    --color-secondary: #3b2c5c;         /* Muted purple secondary */
+    --color-bg: #0f0a19;                /* Dark purple-black background */
+    --color-surface: #1a1225;           /* Dark purple surface */
+    --color-surface-2: #251a33;         /* Slightly lighter dark purple */
+    --color-border: rgba(139, 92, 246, 0.3);  /* Purple-tinted border */
+    --color-text: #f5f3ff;              /* Light text */
+    --color-muted: #a1a1aa;             /* Muted gray */
+    --color-accent: #a78bfa;            /* Lighter violet for dark mode */
+    --color-accent-strong: #8b5cf6;     /* Bright violet */
+    --color-ai: #a78bfa;                /* Light violet for AI elements */
+    --right-panel-width: 20rem;
+    --chat-sidebar-width: 18rem;
+    --chat-sidebar-collapsed: 3rem;
+
+    /* shadcn/ui dark variables - Purple theme */
+    --background: 263 41% 7%;           /* Dark purple-black */
+    --foreground: 253 91% 97%;          /* Light purple-white */
+    --card: 270 40% 10%;
+    --card-foreground: 253 91% 97%;
+    --popover: 270 40% 10%;
+    --popover-foreground: 253 91% 97%;
+    --primary: 258 90% 66%;             /* Bright violet */
+    --primary-foreground: 263 41% 7%;
+    --secondary: 270 30% 20%;           /* Dark muted purple */
+    --secondary-foreground: 253 91% 97%;
+    --muted: 270 30% 20%;
+    --muted-foreground: 253 30% 70%;
+    --accent: 263 69% 42%;              /* Deep purple */
+    --accent-foreground: 253 91% 97%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 253 91% 97%;
+    --border: 270 30% 20%;
+    --input: 270 30% 20%;
+    --ring: 258 90% 66%;                /* Bright violet ring */
+  }
+
+  /* Core transitions */
+  * {
+    transition: background-color var(--transition-duration) var(--transition-timing),
+      border-color var(--transition-duration) var(--transition-timing),
+      color var(--transition-duration) var(--transition-timing),
+      opacity var(--transition-duration) var(--transition-timing),
+      transform var(--transition-duration) var(--transition-timing);
+  }
+
+  /* Base styles */
+  html {
+    @apply antialiased;
+    transition: background-color var(--transition-duration) var(--transition-timing);
+  }
+
+  html.dark {
+    background-color: var(--color-bg);
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    @apply antialiased;
+    font-family: var(--font-body);
+  }
+
+  .section-highlight {
+    animation: sectionFlash 1.6s ease-out;
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3);
+    border-radius: 16px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+@keyframes sectionFlash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.5);
+    background-color: rgba(139, 92, 246, 0.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(139, 92, 246, 0);
+    background-color: transparent;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root,
+  :root.dark {
+    --right-panel-width: 24rem;
+  }
+}
+
+@layer components {
+  .tuutta-section {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .tuutta-eyebrow {
+    @apply text-xs uppercase tracking-[0.2em] text-indigo-500 font-semibold;
+  }
+
+  .tuutta-card {
+    @apply rounded-2xl border border-white/60 bg-white/80 backdrop-blur-lg shadow-[0_10px_30px_rgba(15,10,25,0.08)];
+  }
+
+  .dark .tuutta-card {
+    @apply border-white/10 bg-[#15101f]/70 shadow-[0_10px_30px_rgba(0,0,0,0.35)];
+  }
+
+  .tuutta-button-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full text-white font-semibold
+           bg-gradient-to-r from-[#4c1d95] via-[#6d28d9] to-[#8b5cf6]
+           shadow-[0_12px_30px_rgba(91,33,182,0.35)]
+           hover:shadow-[0_16px_40px_rgba(91,33,182,0.45)]
+           transition-all;
+  }
+
+  .tuutta-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full border border-indigo-200
+           text-indigo-900 font-semibold bg-white/80 backdrop-blur-md hover:bg-white;
+  }
+
+  .dark .tuutta-button-secondary {
+    @apply border-indigo-400/30 text-indigo-100 bg-[#1c1626]/80 hover:bg-[#211a2e];
+  }
+
+  .tuutta-pill {
+    @apply inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700;
+  }
+
+  .dark .tuutta-pill {
+    @apply bg-indigo-500/20 text-indigo-200;
+  }
+
+  /* Landing Page Theme - Pure Purple Gradient */
+  .gradient-text {
+    @apply bg-gradient-to-r from-[#5b21b6] to-[#8b5cf6] bg-clip-text text-transparent;
+  }
+
+  .bg-mesh-gradient {
+    background:
+      radial-gradient(at 0% 0%, rgba(91, 33, 182, 0.08) 0, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.08) 0, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(91, 33, 182, 0.05) 0, transparent 50%),
+      radial-gradient(at 0% 100%, rgba(139, 92, 246, 0.05) 0, transparent 50%),
+      linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
+  }
+
+  .dark .bg-mesh-gradient {
+    background:
+      radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.15) 0, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(91, 33, 182, 0.15) 0, transparent 50%),
+      linear-gradient(180deg, #0f0a19 0%, #1a1225 100%);
+  }
+
+  /* Glass morphism - Apple Liquid Retina style */
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-lg rounded-3xl p-6
+           transition-all duration-500 ease-out
+           border border-white/70
+           shadow-[0_8px_24px_rgba(91,33,182,0.08)]
+           hover:shadow-[0_12px_40px_rgba(139,92,246,0.15)]
+           hover:bg-white/90
+           hover:-translate-y-1;
+  }
+
+  .dark .glass-card {
+    @apply bg-[#1a1225]/80 border-[#5b21b6]/20
+           shadow-[0_8px_24px_rgba(0,0,0,0.3)]
+           hover:shadow-[0_12px_40px_rgba(139,92,246,0.2)]
+           hover:bg-[#1a1225]/90;
+  }
+
+  /* Compact glass card for chat messages */
+  .glass-message {
+    @apply bg-white/80 backdrop-blur-lg rounded-2xl p-4
+           transition-all duration-300 ease-out
+           border border-white/70
+           shadow-[0_4px_16px_rgba(91,33,182,0.06)]
+           hover:shadow-[0_6px_24px_rgba(139,92,246,0.12)]
+           hover:bg-white/90;
+  }
+
+  .dark .glass-message {
+    @apply bg-[#1a1225]/80 border-[#5b21b6]/20
+           shadow-[0_4px_16px_rgba(0,0,0,0.2)]
+           hover:shadow-[0_6px_24px_rgba(139,92,246,0.15)]
+           hover:bg-[#1a1225]/90;
+  }
+
+  /* Primary button - Pure Purple gradient */
+  .button-primary {
+    @apply bg-gradient-to-r from-[#5b21b6] to-[#8b5cf6] text-white px-6 py-2.5 rounded-full font-semibold
+           transition-all duration-300
+           shadow-[0_4px_20px_rgba(91,33,182,0.4)]
+           hover:shadow-[0_8px_30px_rgba(139,92,246,0.5)]
+           hover:scale-[1.02]
+           active:scale-[0.98];
+  }
+
+  /* Secondary button - glass style with purple accent */
+  .button-secondary {
+    @apply bg-white/80 backdrop-blur-md border border-[#ddd6fe] text-gray-700 px-6 py-2.5 rounded-full font-semibold
+           transition-all duration-300
+           shadow-[0_2px_12px_rgba(91,33,182,0.06)]
+           hover:shadow-[0_4px_20px_rgba(139,92,246,0.15)]
+           hover:border-[#8b5cf6]/40
+           hover:text-[#5b21b6]
+           hover:scale-[1.02]
+           active:scale-[0.98];
+  }
+
+  .dark .button-secondary {
+    @apply bg-[#1a1225]/80 border-[#5b21b6]/30 text-[#f5f3ff]
+           hover:border-[#8b5cf6]/50;
+  }
+
+  /* Compact input field */
+  .input-compact {
+    @apply bg-white/95 dark:bg-[#1a1225]/90 border border-[#ddd6fe] dark:border-[#5b21b6]/30
+           text-gray-900 dark:text-[#f5f3ff] placeholder-gray-500 dark:placeholder-gray-400
+           rounded-full px-5 py-2.5 text-sm shadow-sm
+           focus:outline-none focus:ring-2 focus:ring-[#8b5cf6]/60 focus:border-[#8b5cf6]/60
+           transition-all duration-300;
+  }
+
+  /* Glass navigation/sidebar */
+  .glass-nav {
+    @apply bg-white/80 backdrop-blur-lg border-r border-[#ddd6fe]/50
+           shadow-[0_4px_20px_rgba(91,33,182,0.05)];
+  }
+
+  .dark .glass-nav {
+    @apply bg-[#1a1225]/80 border-[#5b21b6]/20
+           shadow-[0_4px_20px_rgba(0,0,0,0.2)];
+  }
+
+  /* Glass panel - for right sidebar panels */
+  .glass-panel {
+    @apply bg-white/60 backdrop-blur-3xl rounded-2xl
+           border border-[#ddd6fe]/40
+           shadow-[0_8px_40px_rgba(91,33,182,0.08)]
+           transition-all duration-300;
+  }
+
+  .dark .glass-panel {
+    @apply bg-[#1a1225]/60 border-[#5b21b6]/30
+           shadow-[0_8px_40px_rgba(0,0,0,0.3)];
+  }
+
+  /* Glass sidebar item - for sidebar components */
+  .glass-sidebar-item {
+    @apply bg-white/70 backdrop-blur-md rounded-xl p-4
+           border border-[#ddd6fe]/60
+           shadow-[0_2px_12px_rgba(91,33,182,0.04)]
+           hover:shadow-[0_4px_20px_rgba(139,92,246,0.1)]
+           hover:bg-white/80
+           transition-all duration-300;
+  }
+
+  .dark .glass-sidebar-item {
+    @apply bg-[#1a1225]/70 border-[#5b21b6]/20
+           shadow-[0_2px_12px_rgba(0,0,0,0.15)]
+           hover:shadow-[0_4px_20px_rgba(139,92,246,0.12)]
+           hover:bg-[#1a1225]/80;
+  }
+
+  /* Glass toggle button - for sidebar toggle buttons with better visibility */
+  .glass-toggle-button {
+    @apply bg-white/90 backdrop-blur-md rounded-xl p-4
+           border border-[#ddd6fe]/70
+           shadow-[0_4px_16px_rgba(91,33,182,0.1)]
+           hover:shadow-[0_6px_24px_rgba(139,92,246,0.15)]
+           hover:bg-white/95
+           transition-all duration-300;
+  }
+
+  .dark .glass-toggle-button {
+    @apply bg-[#1a1225]/90 border-[#5b21b6]/30
+           shadow-[0_4px_16px_rgba(0,0,0,0.3)]
+           hover:shadow-[0_6px_24px_rgba(139,92,246,0.2)]
+           hover:bg-[#251a33]/95;
+  }
+
+  /* Ensure panels transition smoothly */
+  [class*="transition-all"] {
+    transition-property: all;
+    transition-timing-function: var(--transition-timing);
+    transition-duration: var(--transition-duration);
+  }
+}
+
+@layer components {
+  /* Minimal system tokens */
+  .card-min {
+    @apply rounded-xl border;
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+  }
+
+  .card-min-ghost {
+    @apply rounded-xl border;
+    background-color: var(--color-surface-2);
+    border-color: var(--color-border);
+  }
+
+  .btn-primary-min {
+    @apply rounded-lg px-4 py-2 text-sm font-medium;
+    background-color: var(--color-accent-strong);
+    color: var(--color-bg);
+  }
+
+  .btn-secondary-min {
+    @apply rounded-lg px-4 py-2 text-sm font-medium border;
+    background-color: transparent;
+    border-color: var(--color-border);
+    color: var(--color-text);
+  }
+
+  .input-min {
+    @apply rounded-lg px-4 py-2 text-sm border outline-none;
+    background-color: transparent;
+    border-color: var(--color-border);
+    color: var(--color-text);
+  }
+
+  .input-min::placeholder {
+    color: var(--color-muted);
+  }
+}
+
+/* 3D transforms */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Toggle switch specific transitions */
+.peer:checked ~ div {
+  @apply bg-[#5b21b6] dark:bg-[#8b5cf6];
+  transition: all var(--transition-duration) var(--transition-timing);
+}
+
+.peer:checked ~ div::after {
+  transform: translateX(100%);
+  transition: transform var(--transition-duration) var(--transition-timing);
+}
+
+/* Panel transitions */
+[style*="transform"] {
+  transition: transform var(--transition-duration) var(--transition-timing);
+}
+
+/* Width transitions for panels */
+[style*="width"] {
+  transition: width var(--transition-duration) var(--transition-timing);
+}
+
+/* Smooth transitions for form elements */
+input,
+select,
+textarea,
+button {
+  transition: background-color var(--transition-duration) var(--transition-timing),
+    border-color var(--transition-duration) var(--transition-timing),
+    color var(--transition-duration) var(--transition-timing),
+    box-shadow var(--transition-duration) var(--transition-timing),
+    transform var(--transition-duration) var(--transition-timing);
+}
+
+/* Ensure toggle switches transition smoothly */
+.peer:checked ~ div::after {
+  transition: transform var(--transition-duration) var(--transition-timing),
+    background-color var(--transition-duration) var(--transition-timing);
+}
+
+/* Refined toggle switch styles */
+.peer:focus ~ div {
+  @apply ring-2 ring-offset-2 ring-violet-300 dark:ring-violet-800;
+}
+
+.peer:checked:focus ~ div {
+  @apply ring-2 ring-offset-2 ring-violet-500 dark:ring-violet-400;
+}
+
+.peer:disabled ~ div {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+.peer:disabled ~ div::after {
+  @apply opacity-50;
+}
+
+/* Chat highlight animation */
+@keyframes highlight {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: rgba(139, 92, 246, 0.1);
+  }
+}
+
+.animate-highlight {
+  animation: highlight 2s ease-in-out;
+}
+
+/* Dark mode highlight */
+.dark .animate-highlight {
+  animation-name: highlight-dark;
+}
+
+@keyframes highlight-dark {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: rgba(139, 92, 246, 0.2);
+  }
+}
+
+/* Enhanced card styles */
+.card {
+  @apply rounded-xl border shadow-sm transition-all duration-300;
+}
+
+.card.dark {
+  @apply border-gray-700 bg-gray-800;
+}
+
+.card.light {
+  @apply border-gray-200 bg-white;
+}
+
+/* Enhanced button styles */
+.btn {
+  @apply rounded-lg px-4 py-2 font-medium transition-colors duration-200;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-r from-[#5b21b6] to-[#8b5cf6] text-white hover:shadow-lg hover:scale-[1.02] transition-all;
+}
+
+.btn-secondary {
+  @apply bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600;
+}
+
+.btn-success {
+  @apply bg-green-600 text-white hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600;
+}
+
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600;
+}
+
+/* Enhanced input styles */
+.input {
+  @apply rounded-lg border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500;
+}
+
+.input.dark {
+  @apply border-gray-600 bg-gray-700 text-white placeholder-gray-400;
+}
+
+.input.light {
+  @apply border-gray-300 bg-white text-gray-900 placeholder-gray-500;
+}
+
+/* Enhanced badge styles */
+.badge {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+}
+
+.badge-blue {
+  @apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300;
+}
+
+.badge-green {
+  @apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300;
+}
+
+.badge-purple {
+  @apply bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300;
+}
+
+.badge-amber {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300;
+}
+
+.badge-red {
+  @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300;
+}
+
+.badge-gray {
+  @apply bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300;
+}
+
+/* Enhanced progress bar styles */
+.progress-container {
+  @apply h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700;
+}
+
+.progress-bar {
+  @apply h-full rounded-full transition-all duration-500 ease-out;
+}
+
+.progress-bar-blue {
+  @apply bg-blue-600 dark:bg-blue-500;
+}
+
+.progress-bar-green {
+  @apply bg-green-600 dark:bg-green-500;
+}
+
+.progress-bar-purple {
+  @apply bg-purple-600 dark:bg-purple-500;
+}
+
+.progress-bar-amber {
+  @apply bg-amber-600 dark:bg-amber-500;
+}
+
+.progress-bar-red {
+  @apply bg-red-600 dark:bg-red-500;
+}
+
+.progress-bar-indigo {
+  @apply bg-indigo-600 dark:bg-indigo-500;
+}
+
+/* Drag and Drop Layout */
+.drag-drop-grid {
+  @apply flex flex-col space-y-6;
+}
+
+.drag-drop-item {
+  @apply p-4 rounded-lg border transition-all duration-300;
+}
+
+.drag-drop-item.dark {
+  @apply bg-gray-800 border-gray-700 hover:border-gray-600;
+}
+
+.drag-drop-item.light {
+  @apply bg-white border-gray-200 hover:border-gray-300;
+}
+
+/* Ensure the heading is above the items */
+.drag-drop-header {
+  @apply text-xl font-semibold mb-6 text-center;
+}
+
+.drag-drop-content {
+  @apply flex flex-col space-y-4;
+}
+
+/* Draggable item styles */
+.draggable-item {
+  @apply p-3 rounded-lg cursor-move transition-all duration-200 flex items-center space-x-2;
+}
+
+.draggable-item.dark {
+  @apply bg-gray-700 border border-gray-600 hover:bg-gray-600;
+}
+
+.draggable-item.light {
+  @apply bg-white border border-gray-200 hover:bg-gray-50 shadow-sm;
+}
+
+/* Droppable zone styles */
+.droppable-zone {
+  @apply p-4 rounded-lg min-h-[120px] transition-colors duration-200 mt-2;
+}
+
+.droppable-zone.dark {
+  @apply bg-gray-800/50 border border-gray-700;
+}
+
+.droppable-zone.light {
+  @apply bg-gray-50/80 border border-gray-200;
+}
+
+/* Category styles */
+.category-section {
+  @apply mt-8;
+}
+
+/* Use grid layout for categories */
+.category-grid {
+  @apply grid grid-cols-1 md:grid-cols-3 gap-4;
+}
+
+.category-header {
+  @apply text-lg font-medium mb-2 text-center;
+}
+
+/* Active drag states */
+.dragging {
+  @apply opacity-50 scale-105;
+}
+
+.drag-over {
+  @apply ring-2 ring-violet-500 bg-violet-50/10;
+}
+
+/* Enhanced section styles */
+.section {
+  @apply rounded-xl border p-5 shadow-sm transition-all duration-300;
+}
+
+.section.dark {
+  @apply border-gray-700 bg-gray-800;
+}
+
+.section.light {
+  @apply border-gray-200 bg-white;
+}
+
+/* Enhanced tab styles */
+.tab {
+  @apply flex items-center space-x-2 rounded-lg px-3 py-2 text-sm transition-colors;
+}
+
+.tab.active.dark {
+  @apply bg-violet-900 text-violet-200;
+}
+
+.tab.active.light {
+  @apply bg-violet-100 text-violet-700;
+}
+
+.tab.inactive.dark {
+  @apply text-gray-300 hover:bg-gray-800;
+}
+
+.tab.inactive.light {
+  @apply text-gray-600 hover:bg-gray-100;
+}
+
+/* Enhanced scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-gray-400 dark:bg-gray-600;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500 dark:bg-gray-500;
+}
+
+/* Enhanced focus styles */
+*:focus-visible {
+  @apply outline-none ring-2 ring-violet-500 ring-offset-2 dark:ring-offset-[#0f0a19];
+}
