@@ -85,5 +85,5 @@ databases:
   - name: tuutta-db
     plan: starter
     region: oregon
-    postgresMajorVersion: 16
+    postgresMajorVersion: "16"
     ipAllowList: []
