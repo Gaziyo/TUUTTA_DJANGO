@@ -1,11 +1,31 @@
-asgiref==3.11.1
-Django==6.0.2
-django-cors-headers==4.9.0
-django-filter==25.2
-djangorestframework==3.16.1
-djangorestframework_simplejwt==5.5.1
+# Core Django
+Django==5.0.2
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+
+# JWT Authentication
+djangorestframework-simplejwt==5.3.1
 PyJWT==2.11.0
-setuptools==69.5.1
-sqlparse==0.5.5
-wheel==0.43.0
-whitenoise==6.11.0
+
+# API schema / docs
+drf-spectacular==0.27.1
+
+# Nested routers
+drf-nested-routers==0.94.1
+
+# Static files
+whitenoise==6.6.0
+
+# Async tasks
+celery==5.3.6
+redis==5.3.1
+
+# AI
+openai==1.12.0
+
+# Environment
+python-dotenv==1.0.1
+
+# WSGI utils
+asgiref==3.7.2
+sqlparse==0.4.4

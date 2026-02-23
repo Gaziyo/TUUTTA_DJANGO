@@ -25,9 +25,9 @@ services:
           type: redis
           property: connectionString
       - key: ALLOWED_HOSTS
-        value: tuutta-api.onrender.com,api.tuutta.com
+        value: tuutta-django.onrender.com,tuutta-api.onrender.com,api.tuutta.com
       - key: CORS_ALLOWED_ORIGINS
-        value: https://tuutta.com,https://tuutta-frontend.onrender.com
+        value: https://tuutta.com,https://tuutta-frontend.onrender.com,https://tuutta-django.onrender.com
       - key: OPENAI_API_KEY
         sync: false
       - key: AWS_ACCESS_KEY_ID
