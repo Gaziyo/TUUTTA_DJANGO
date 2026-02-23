@@ -6,7 +6,7 @@ from rest_framework_nested import routers as nested_routers
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.accounts.views import RegisterView, LoginView, LogoutView, CurrentUserView
-from apps.organizations.views import OrganizationViewSet, DepartmentViewSet, TeamViewSet, MyMembershipsView
+from apps.organizations.views import OrganizationViewSet, DepartmentViewSet, TeamViewSet, MyMembershipsView, OrganizationMemberViewSet, MemberDetailView
 from apps.courses.views import CourseViewSet, CourseModuleViewSet, LessonViewSet
 from apps.assessments.views import AssessmentViewSet, QuestionViewSet
 from apps.enrollments.views import EnrollmentViewSet
@@ -41,6 +41,7 @@ assessments_router.register(r'questions', QuestionViewSet, basename='assessment-
 orgs_router = nested_routers.NestedDefaultRouter(router, r'organizations', lookup='organization')
 orgs_router.register(r'departments', DepartmentViewSet, basename='organization-departments')
 orgs_router.register(r'teams', TeamViewSet, basename='organization-teams')
+orgs_router.register(r'members', OrganizationMemberViewSet, basename='organization-members')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -54,8 +55,9 @@ urlpatterns = [
         path('auth/token/refresh/', __import__('rest_framework_simplejwt.views', fromlist=['TokenRefreshView']).TokenRefreshView.as_view(), name='token-refresh'),
         path('auth/me/', CurrentUserView.as_view(), name='current-user'),
 
-        # Memberships for the current user
+        # Memberships
         path('members/me/', MyMembershipsView.as_view(), name='my-memberships'),
+        path('members/<uuid:pk>/', MemberDetailView.as_view(), name='member-detail'),
 
         # Main routes
         path('', include(router.urls)),
