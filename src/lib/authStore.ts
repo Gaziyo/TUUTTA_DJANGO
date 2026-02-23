@@ -50,8 +50,8 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
         try {
           const { data } = await apiClient.post('/auth/register/', registerData);
-          localStorage.setItem('accessToken', data.tokens.access);
-          localStorage.setItem('refreshToken', data.tokens.refresh);
+          localStorage.setItem('accessToken', data.access);
+          localStorage.setItem('refreshToken', data.refresh);
           set({ user: data.user, isAuthenticated: true, isLoading: false });
         } catch (error) {
           set({ isLoading: false });
