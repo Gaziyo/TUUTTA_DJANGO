@@ -6,7 +6,7 @@ from rest_framework_nested import routers as nested_routers
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.accounts.views import RegisterView, LoginView, LogoutView, CurrentUserView
-from apps.organizations.views import OrganizationViewSet, DepartmentViewSet, TeamViewSet
+from apps.organizations.views import OrganizationViewSet, DepartmentViewSet, TeamViewSet, MyMembershipsView
 from apps.courses.views import CourseViewSet, CourseModuleViewSet, LessonViewSet
 from apps.assessments.views import AssessmentViewSet, QuestionViewSet
 from apps.enrollments.views import EnrollmentViewSet
@@ -53,6 +53,9 @@ urlpatterns = [
         path('auth/logout/', LogoutView.as_view(), name='logout'),
         path('auth/token/refresh/', __import__('rest_framework_simplejwt.views', fromlist=['TokenRefreshView']).TokenRefreshView.as_view(), name='token-refresh'),
         path('auth/me/', CurrentUserView.as_view(), name='current-user'),
+
+        # Memberships for the current user
+        path('members/me/', MyMembershipsView.as_view(), name='my-memberships'),
 
         # Main routes
         path('', include(router.urls)),

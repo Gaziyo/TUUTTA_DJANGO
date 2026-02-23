@@ -1,7 +1,7 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, generics
 from rest_framework.permissions import IsAuthenticated
 from .models import Organization, OrganizationMember, Department, Team
-from .serializers import OrganizationSerializer, DepartmentSerializer, TeamSerializer
+from .serializers import OrganizationSerializer, DepartmentSerializer, TeamSerializer, OrganizationMemberDetailSerializer
 
 
 class OrganizationViewSet(viewsets.ModelViewSet):
@@ -40,3 +40,14 @@ class TeamViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         org_id = self.kwargs.get('organization_pk')
         return Team.objects.filter(organization_id=org_id)
+
+
+class MyMembershipsView(generics.ListAPIView):
+    """Return all organization memberships for the currently authenticated user."""
+    serializer_class = OrganizationMemberDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return OrganizationMember.objects.filter(
+            user=self.request.user
+        ).select_related('organization', 'user')

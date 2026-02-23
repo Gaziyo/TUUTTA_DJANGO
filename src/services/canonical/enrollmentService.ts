@@ -1,30 +1,12 @@
 /**
- * Enrollment Service — Canonical Implementation
+ * Enrollment Service — Canonical Implementation (Django API)
  *
- * Collection: /enrollments/{orgId}_{userId}_{courseId}
- *
- * Uses deterministic compound IDs to prevent duplicate enrollments.
- * All enrollment operations go through this service.
- * Components NEVER call Firestore directly.
+ * Replaces the Firestore implementation.
+ * Uses apiClient to call the Django REST API.
  */
 
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  getDocs,
-  query,
-  where,
-  collection,
-  serverTimestamp,
-  runTransaction,
-  Timestamp,
-} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
-import type { Enrollment, EnrollmentStatus, ProgressSummary } from '../../types/schema';
-import { activity } from './activityService';
-import { observabilityService } from '../observabilityService';
+import { apiClient } from '../../lib/api';
+import type { Enrollment, EnrollmentStatus } from '../../types/schema';
 
 export class EnrollmentNotFoundError extends Error {
   constructor(enrollmentId: string) {
@@ -40,134 +22,96 @@ export class AlreadyEnrolledError extends Error {
   }
 }
 
-/**
- * Generate deterministic enrollment ID.
- * Format: {orgId}_{userId}_{courseId}
- */
+/** Generate deterministic enrollment ID (kept for ID-based lookups). */
 export function generateEnrollmentId(orgId: string, userId: string, courseId: string): string {
   return `${orgId}_${userId}_${courseId}`;
 }
 
-/**
- * Generate deterministic progress summary ID.
- * Format: {userId}_{courseId}
- */
+/** Generate deterministic progress summary ID. */
 export function generateProgressId(userId: string, courseId: string): string {
   return `${userId}_${courseId}`;
 }
 
+function mapEnrollment(data: Record<string, unknown>): Enrollment {
+  return {
+    id: data.id as string,
+    orgId: (data.organization as string) ?? '',
+    userId: (data.user as string) ?? '',
+    courseId: (data.course as string) ?? '',
+    enrolledBy: (data.assigned_by as string) ?? '',
+    status: (data.status as EnrollmentStatus) ?? 'active',
+    enrolledAt: data.enrolled_at as any,
+    completedAt: data.completed_at as any ?? null,
+    dueDate: data.due_date as any ?? null,
+    certificateId: null,
+  };
+}
+
 /**
- * Enroll a user in a course.
- *
- * This is idempotent — enrolling the same user twice is a no-op.
- * Creates both the enrollment doc and the progress summary doc atomically
- * using a Firestore transaction to prevent orphaned documents.
+ * Enroll a user in a course (idempotent — returns existing if already enrolled).
  */
 export async function enroll(
   orgId: string,
   userId: string,
   courseId: string,
   enrolledBy: string,
-  options?: {
-    dueDate?: Date;
-  }
+  options?: { dueDate?: Date }
 ): Promise<Enrollment> {
-  const enrollmentId = generateEnrollmentId(orgId, userId, courseId);
-  const progressId = generateProgressId(userId, courseId);
-
-  const enrollmentRef = doc(db, 'enrollments', enrollmentId);
-  const progressRef = doc(db, 'progress', progressId);
-
-  // Use transaction to atomically create both enrollment and progress docs
-  const result = await runTransaction(db, async (transaction) => {
-    // Check if already enrolled (within transaction for consistency)
-    const existingEnrollment = await transaction.get(enrollmentRef);
-    if (existingEnrollment.exists()) {
-      // Idempotent: return existing enrollment
-      return { enrollment: existingEnrollment.data() as Enrollment, isNew: false };
-    }
-
-    // Create timestamp once for consistency
-    const now = Timestamp.now();
-
-    const enrollment: Enrollment = {
-      id: enrollmentId,
-      orgId,
-      userId,
-      courseId,
-      enrolledBy,
-      status: 'active',
-      enrolledAt: now as any,
-      completedAt: null,
-      dueDate: options?.dueDate ? Timestamp.fromDate(options.dueDate) as any : null,
-      certificateId: null,
-    };
-
-    const progressSummary: ProgressSummary = {
-      id: progressId,
-      userId,
-      courseId,
-      orgId,
-      enrollmentId,
-      completedLessonIds: [],
-      completedModuleIds: [],
-      lastLessonId: null,
-      percentComplete: 0,
-      totalTimeSpentSeconds: 0,
-      updatedAt: now as any,
-    };
-
-    // Both writes happen atomically within the transaction
-    transaction.set(enrollmentRef, enrollment);
-    transaction.set(progressRef, progressSummary);
-
-    return { enrollment, isNew: true };
-  });
-
-  // Only log activity and observability for new enrollments (outside transaction)
-  if (result.isNew) {
-    // Log activity (non-blocking)
-    activity.courseEnroll(orgId, userId, courseId, enrolledBy).catch(() => {});
-
-    // Observability: Critical path event (non-blocking)
-    observabilityService.logUserAction({
-      orgId,
-      actorId: enrolledBy,
-      action: 'enrollment_created',
-      status: 'success',
-      entityType: 'enrollment',
-      entityId: enrollmentId,
-      metadata: { userId, courseId },
-    }).catch(() => {});
+  const payload: Record<string, unknown> = {
+    organization: orgId,
+    user: userId,
+    course: courseId,
+    assigned_by: enrolledBy,
+    status: 'active',
+  };
+  if (options?.dueDate) {
+    payload.due_date = options.dueDate.toISOString();
   }
-
-  return result.enrollment;
+  try {
+    const { data } = await apiClient.post('/enrollments/', payload);
+    return mapEnrollment(data);
+  } catch (err: unknown) {
+    // If already enrolled, fetch the existing enrollment
+    const axiosErr = err as { response?: { status: number; data?: unknown } };
+    if (axiosErr?.response?.status === 400) {
+      const existing = await getEnrollmentForUserCourse(orgId, userId, courseId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 /**
  * Get an enrollment by ID.
  */
 export async function getEnrollment(enrollmentId: string): Promise<Enrollment | null> {
-  const enrollmentRef = doc(db, 'enrollments', enrollmentId);
-  const snapshot = await getDoc(enrollmentRef);
-
-  if (!snapshot.exists()) {
-    return null;
+  try {
+    const { data } = await apiClient.get(`/enrollments/${enrollmentId}/`);
+    return mapEnrollment(data);
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { status: number } };
+    if (axiosErr?.response?.status === 404) return null;
+    throw err;
   }
-
-  return snapshot.data() as Enrollment;
 }
 
 /**
- * Get enrollment by org, user, and course (convenience method).
+ * Get enrollment by org, user, and course.
  */
 export async function getEnrollmentForUserCourse(
   orgId: string,
   userId: string,
   courseId: string
 ): Promise<Enrollment | null> {
-  const enrollmentId = generateEnrollmentId(orgId, userId, courseId);
-  return getEnrollment(enrollmentId);
+  try {
+    const { data } = await apiClient.get(
+      `/enrollments/?organization=${orgId}&user=${userId}&course=${courseId}`
+    );
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results[0] ? mapEnrollment(results[0]) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -175,9 +119,7 @@ export async function getEnrollmentForUserCourse(
  */
 export async function getEnrollmentOrThrow(enrollmentId: string): Promise<Enrollment> {
   const enrollment = await getEnrollment(enrollmentId);
-  if (!enrollment) {
-    throw new EnrollmentNotFoundError(enrollmentId);
-  }
+  if (!enrollment) throw new EnrollmentNotFoundError(enrollmentId);
   return enrollment;
 }
 
@@ -185,41 +127,39 @@ export async function getEnrollmentOrThrow(enrollmentId: string): Promise<Enroll
  * Get all enrollments for a user in an organization.
  */
 export async function getEnrollmentsForUser(orgId: string, userId: string): Promise<Enrollment[]> {
-  const enrollmentsRef = collection(db, 'enrollments');
-  const q = query(
-    enrollmentsRef,
-    where('orgId', '==', orgId),
-    where('userId', '==', userId)
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as Enrollment);
+  try {
+    const { data } = await apiClient.get(`/enrollments/?organization=${orgId}&user=${userId}`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(mapEnrollment);
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Get all enrollments for a course.
  */
 export async function getEnrollmentsForCourse(orgId: string, courseId: string): Promise<Enrollment[]> {
-  const enrollmentsRef = collection(db, 'enrollments');
-  const q = query(
-    enrollmentsRef,
-    where('orgId', '==', orgId),
-    where('courseId', '==', courseId)
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as Enrollment);
+  try {
+    const { data } = await apiClient.get(`/enrollments/?organization=${orgId}&course=${courseId}`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(mapEnrollment);
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Get all enrollments in an organization.
  */
 export async function getEnrollmentsForOrg(orgId: string): Promise<Enrollment[]> {
-  const enrollmentsRef = collection(db, 'enrollments');
-  const q = query(enrollmentsRef, where('orgId', '==', orgId));
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as Enrollment);
+  try {
+    const { data } = await apiClient.get(`/enrollments/?organization=${orgId}`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(mapEnrollment);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -229,15 +169,13 @@ export async function getEnrollmentsByStatus(
   orgId: string,
   status: EnrollmentStatus
 ): Promise<Enrollment[]> {
-  const enrollmentsRef = collection(db, 'enrollments');
-  const q = query(
-    enrollmentsRef,
-    where('orgId', '==', orgId),
-    where('status', '==', status)
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as Enrollment);
+  try {
+    const { data } = await apiClient.get(`/enrollments/?organization=${orgId}&status=${status}`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(mapEnrollment);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -247,31 +185,7 @@ export async function updateEnrollmentStatus(
   enrollmentId: string,
   status: EnrollmentStatus
 ): Promise<void> {
-  const enrollment = await getEnrollmentOrThrow(enrollmentId);
-  const enrollmentRef = doc(db, 'enrollments', enrollmentId);
-
-  const updates: Partial<Enrollment> = { status };
-
-  if (status === 'completed') {
-    updates.completedAt = serverTimestamp() as any;
-  }
-
-  await updateDoc(enrollmentRef, updates);
-
-  if (status === 'completed') {
-    await activity.courseComplete(enrollment.orgId, enrollment.userId, enrollment.courseId);
-
-    // Observability: Critical path event
-    observabilityService.logUserAction({
-      orgId: enrollment.orgId,
-      actorId: enrollment.userId,
-      action: 'enrollment_completed',
-      status: 'success',
-      entityType: 'enrollment',
-      entityId: enrollmentId,
-      metadata: { courseId: enrollment.courseId },
-    }).catch(() => {}); // Non-blocking
-  }
+  await apiClient.patch(`/enrollments/${enrollmentId}/`, { status });
 }
 
 /**
@@ -284,65 +198,39 @@ export async function completeEnrollment(enrollmentId: string): Promise<void> {
 /**
  * Withdraw from an enrollment.
  */
-export async function withdrawEnrollment(
-  enrollmentId: string,
-  reason?: string
-): Promise<void> {
-  const enrollment = await getEnrollmentOrThrow(enrollmentId);
+export async function withdrawEnrollment(enrollmentId: string, _reason?: string): Promise<void> {
   await updateEnrollmentStatus(enrollmentId, 'withdrawn');
-
-  await activity.enrollmentWithdraw(
-    enrollment.orgId,
-    enrollment.userId,
-    enrollmentId,
-    reason
-  );
 }
 
 /**
- * Link a certificate to an enrollment.
+ * Link a certificate to an enrollment (stored server-side; no-op client-side).
  */
-export async function linkCertificate(
-  enrollmentId: string,
-  certificateId: string
-): Promise<void> {
-  await getEnrollmentOrThrow(enrollmentId);
-  const enrollmentRef = doc(db, 'enrollments', enrollmentId);
-
-  await updateDoc(enrollmentRef, { certificateId });
+export async function linkCertificate(_enrollmentId: string, _certificateId: string): Promise<void> {
+  // Certificate linking is handled server-side by the Django backend.
 }
 
 /**
  * Bulk enroll multiple users in a course.
- * Returns list of created enrollments (skips already enrolled users).
  */
 export async function bulkEnroll(
   orgId: string,
   userIds: string[],
   courseId: string,
   enrolledBy: string,
-  options?: {
-    dueDate?: Date;
-  }
+  options?: { dueDate?: Date }
 ): Promise<Enrollment[]> {
   const enrollments: Enrollment[] = [];
-
   for (const userId of userIds) {
     const enrollment = await enroll(orgId, userId, courseId, enrolledBy, options);
     enrollments.push(enrollment);
   }
-
   return enrollments;
 }
 
 /**
  * Check if a user is enrolled in a course.
  */
-export async function isEnrolled(
-  orgId: string,
-  userId: string,
-  courseId: string
-): Promise<boolean> {
+export async function isEnrolled(orgId: string, userId: string, courseId: string): Promise<boolean> {
   const enrollment = await getEnrollmentForUserCourse(orgId, userId, courseId);
   return enrollment !== null && enrollment.status !== 'withdrawn';
 }

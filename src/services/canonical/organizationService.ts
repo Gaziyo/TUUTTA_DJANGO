@@ -1,24 +1,11 @@
 /**
- * Organization Service — Canonical Implementation
+ * Organization Service — Canonical Implementation (Django API)
  *
- * Collection: /organizations/{orgId}
- *
- * All organization operations go through this service.
- * Components NEVER call Firestore directly.
+ * Replaces the Firestore implementation.
+ * Uses apiClient to call the Django REST API.
  */
 
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  getDocs,
-  query,
-  where,
-  collection,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { apiClient } from '../../lib/api';
 import type { Organization } from '../../types/schema';
 
 export class OrganizationNotFoundError extends Error {
@@ -28,39 +15,60 @@ export class OrganizationNotFoundError extends Error {
   }
 }
 
+// Map Django plan values to schema plan values
+function mapPlan(plan: string): Organization['plan'] {
+  const map: Record<string, Organization['plan']> = {
+    free: 'free',
+    starter: 'starter',
+    professional: 'pro',
+    enterprise: 'enterprise',
+  };
+  return map[plan] ?? 'free';
+}
+
+function mapOrg(data: Record<string, unknown>): Organization {
+  const settings = (data.settings ?? {}) as Record<string, unknown>;
+  return {
+    id: data.id as string,
+    name: data.name as string,
+    plan: mapPlan(data.plan as string),
+    allowSelfEnrollment: (settings.allowSelfEnrollment as boolean) ?? false,
+    requireManagerApproval: (settings.requireManagerApproval as boolean) ?? false,
+    createdAt: data.created_at as any,
+  };
+}
+
 /**
  * Create a new organization.
  */
 export async function createOrganization(
   data: Omit<Organization, 'id' | 'createdAt'>
 ): Promise<Organization> {
-  const orgRef = doc(collection(db, 'organizations'));
-
-  const organization: Organization = {
-    id: orgRef.id,
+  const payload = {
     name: data.name,
-    plan: data.plan ?? 'free',
-    allowSelfEnrollment: data.allowSelfEnrollment ?? false,
-    requireManagerApproval: data.requireManagerApproval ?? false,
-    createdAt: serverTimestamp() as any,
+    slug: data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+    plan: data.plan === 'pro' ? 'professional' : data.plan,
+    settings: {
+      allowSelfEnrollment: data.allowSelfEnrollment ?? false,
+      requireManagerApproval: data.requireManagerApproval ?? false,
+    },
   };
-
-  await setDoc(orgRef, organization);
-  return organization;
+  const { data: result } = await apiClient.post('/organizations/', payload);
+  return mapOrg(result);
 }
 
 /**
  * Get an organization by ID.
  */
 export async function getOrganization(orgId: string): Promise<Organization | null> {
-  const orgRef = doc(db, 'organizations', orgId);
-  const snapshot = await getDoc(orgRef);
-
-  if (!snapshot.exists()) {
-    return null;
+  try {
+    const { data } = await apiClient.get(`/organizations/${orgId}/`);
+    return mapOrg(data);
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { status: number } };
+    if (axiosErr?.response?.status === 404) return null;
+    throw err;
   }
-
-  return snapshot.data() as Organization;
 }
 
 /**
@@ -81,38 +89,39 @@ export async function updateOrganization(
   orgId: string,
   updates: Partial<Omit<Organization, 'id' | 'createdAt'>>
 ): Promise<void> {
-  await getOrganizationOrThrow(orgId);
-  const orgRef = doc(db, 'organizations', orgId);
-  await updateDoc(orgRef, updates);
+  const payload: Record<string, unknown> = {};
+  if (updates.name !== undefined) payload.name = updates.name;
+  if (updates.plan !== undefined) payload.plan = updates.plan === 'pro' ? 'professional' : updates.plan;
+  if (updates.allowSelfEnrollment !== undefined || updates.requireManagerApproval !== undefined) {
+    // Fetch current settings to merge
+    const { data: current } = await apiClient.get(`/organizations/${orgId}/`);
+    payload.settings = {
+      ...(current.settings ?? {}),
+      ...(updates.allowSelfEnrollment !== undefined ? { allowSelfEnrollment: updates.allowSelfEnrollment } : {}),
+      ...(updates.requireManagerApproval !== undefined ? { requireManagerApproval: updates.requireManagerApproval } : {}),
+    };
+  }
+  await apiClient.patch(`/organizations/${orgId}/`, payload);
 }
 
 /**
  * Update organization plan.
  */
-export async function updatePlan(
-  orgId: string,
-  plan: Organization['plan']
-): Promise<void> {
+export async function updatePlan(orgId: string, plan: Organization['plan']): Promise<void> {
   await updateOrganization(orgId, { plan });
 }
 
 /**
  * Update self-enrollment setting.
  */
-export async function setSelfEnrollment(
-  orgId: string,
-  allowSelfEnrollment: boolean
-): Promise<void> {
+export async function setSelfEnrollment(orgId: string, allowSelfEnrollment: boolean): Promise<void> {
   await updateOrganization(orgId, { allowSelfEnrollment });
 }
 
 /**
  * Update manager approval requirement.
  */
-export async function setManagerApprovalRequired(
-  orgId: string,
-  requireManagerApproval: boolean
-): Promise<void> {
+export async function setManagerApprovalRequired(orgId: string, requireManagerApproval: boolean): Promise<void> {
   await updateOrganization(orgId, { requireManagerApproval });
 }
 
