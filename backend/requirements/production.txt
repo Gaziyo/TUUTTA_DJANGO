@@ -1,7 +1,7 @@
 -r base.txt
 
 # PostgreSQL driver (production uses Postgres, not SQLite)
-psycopg[binary]==3.1.18
+psycopg[binary]==3.2.13
 dj-database-url==2.1.0
 
 # WSGI server
