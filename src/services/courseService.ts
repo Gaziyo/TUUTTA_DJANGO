@@ -5,7 +5,7 @@
  * courseService (canonical/courseService.ts) during the migration period.
  *
  * Components continue to use the legacy Course interface, while this adapter
- * translates to/from the canonical Firestore structure.
+ * translates to/from the canonical service shape.
  *
  * TODO: After migration is complete, update components to use canonical types
  * and remove this adapter.
@@ -68,7 +68,7 @@ function toCanonicalInput(course: Omit<LegacyCourse, 'id' | 'createdAt' | 'updat
 export const courseService = {
   /**
    * Create a new course.
-   * Uses canonical service for Firestore write, returns legacy format.
+   * Uses canonical service write path, returns legacy format.
    */
   create: async (course: Omit<LegacyCourse, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Promise<LegacyCourse> => {
     const canonicalCourse = await canonical.createCourse(toCanonicalInput(course));

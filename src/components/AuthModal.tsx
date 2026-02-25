@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Eye, EyeOff } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../lib/authStore';
 import { useStore, DEFAULT_SETTINGS } from '../store';
 
@@ -21,6 +22,8 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode = 'l
   const { login, register } = useAuthStore();
   const { setUser, user } = useStore();
   const isDarkMode = user?.settings?.theme === 'dark';
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -68,7 +71,12 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode = 'l
       setEmail('');
       setPassword('');
       setConfirmPassword('');
-      onClose();
+      const isStandaloneAuthRoute = location.pathname === '/login' || location.pathname === '/signup';
+      if (isStandaloneAuthRoute) {
+        navigate('/home', { replace: true });
+      } else {
+        onClose();
+      }
     } catch (err: unknown) {
       // Handle Django REST framework error responses
       if (err && typeof err === 'object' && 'response' in err) {

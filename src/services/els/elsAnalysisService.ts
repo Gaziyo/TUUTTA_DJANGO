@@ -1,7 +1,7 @@
 /**
  * ELS Analysis Service — Phase 2: Needs Analysis
  * Phase output data is stored in ELSProjectPhase.output_data via the
- * phase complete endpoint. No dedicated Firestore collection needed.
+ * phase complete endpoint. No dedicated client-side data store needed.
  */
 import { apiClient } from '@/lib/api';
 import type { ELSNeedsAnalysis } from '@/types/els';

@@ -18,12 +18,12 @@ The `.env` file has been updated with both frontend and backend variables:
 
 ```env
 # Frontend (Vite)
-VITE_GOOGLE_API_KEY=AIzaSyDGAsjRCWpfVsJpX4LFRYiV1nO2qrIZNw4
-VITE_GOOGLE_CSE_ID=54035cec2c1914cf0
+VITE_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
+VITE_GOOGLE_CSE_ID=YOUR_GOOGLE_CSE_ID
 
 # Backend (Netlify Functions)
-GOOGLE_API_KEY=AIzaSyDGAsjRCWpfVsJpX4LFRYiV1nO2qrIZNw4
-GOOGLE_CSE_ID=54035cec2c1914cf0
+GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY
+GOOGLE_CSE_ID=YOUR_GOOGLE_CSE_ID
 ```
 
 ### 🔧 Step 2: Production (Netlify Dashboard) - YOU NEED TO DO THIS
@@ -42,12 +42,12 @@ To make web search work in production, add these environment variables to Netlif
 
    **Variable 1:**
    - Key: `GOOGLE_API_KEY`
-   - Value: `AIzaSyDGAsjRCWpfVsJpX4LFRYiV1nO2qrIZNw4`
+   - Value: `YOUR_GOOGLE_API_KEY`
    - Scopes: Check "All scopes" or at least "Builds" and "Functions"
 
    **Variable 2:**
    - Key: `GOOGLE_CSE_ID`
-   - Value: `54035cec2c1914cf0`
+   - Value: `YOUR_GOOGLE_CSE_ID`
    - Scopes: Check "All scopes" or at least "Builds" and "Functions"
 
 4. **Deploy**

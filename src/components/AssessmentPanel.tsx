@@ -148,7 +148,7 @@ const AssessmentPanel: React.FC = () => {
 
     try {
       // Import the saveAssessment function
-      const { saveAssessment } = await import('../lib/firestoreService');
+      const { saveAssessment } = await import('../lib/clientPersistenceService');
       await saveAssessment(user.id, assessmentResult);
       // Update achievement for high scores
       const { updateAchievementProgress } = useStore.getState();

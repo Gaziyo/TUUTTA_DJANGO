@@ -9,7 +9,7 @@
  * A dedicated /assessment-attempts/ endpoint will be added in a future phase.
  *
  * All assessment operations go through this service.
- * Components NEVER call Firestore directly.
+ * Components should not bypass this layer.
  */
 
 import { apiClient } from '../../lib/api';

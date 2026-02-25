@@ -243,7 +243,7 @@ const ChatInterface = ({ variant = 'default', contextInfo, focusAreas }: ChatInt
       // Upload file using the shared storage logic
       const uploadedFile = await uploadFile(file, user.id);
 
-      // Add to store (persists to Firestore)
+      // Add to store (persists via client/backend service layer)
       addFile(uploadedFile);
 
       // Notify user in chat

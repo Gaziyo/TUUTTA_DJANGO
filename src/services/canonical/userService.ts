@@ -7,7 +7,7 @@
  *   PATCH     /members/{id}/          — update member record
  *
  * All user operations go through this service.
- * Components NEVER call Firestore directly.
+ * Components should not bypass this layer.
  */
 
 import { apiClient } from '../../lib/api';

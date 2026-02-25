@@ -1,7 +1,6 @@
 /**
  * Enrollment Service — Canonical Implementation (Django API)
  *
- * Replaces the Firestore implementation.
  * Uses apiClient to call the Django REST API.
  */
 

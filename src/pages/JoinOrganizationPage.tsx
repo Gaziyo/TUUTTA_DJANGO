@@ -49,7 +49,7 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
       throw new Error('Please sign in to join an organization.');
     }
 
-    // Firestore membership key required by rules: {orgId}_{authUid}
+    // Membership key format: {orgId}_{authUid}
     const membershipId = `${org.id}_${user.id}`;
     let member = await userService.getMember(membershipId);
 

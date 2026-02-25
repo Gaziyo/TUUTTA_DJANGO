@@ -1,7 +1,7 @@
 /**
  * LMS Service
  *
- * Firebase Firestore removed. Stub only — Django LMS endpoints pending.
+ * Legacy stub — Django LMS endpoints pending.
  * All read operations return empty values; write operations throw (not yet implemented).
  * Local Zustand/localStorage is source of truth until backend endpoints are wired up.
  */

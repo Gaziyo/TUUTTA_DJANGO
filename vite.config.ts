@@ -5,6 +5,15 @@ import path from 'path';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_DEV_BACKEND_ORIGIN || 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
   resolve: {
     alias: {
       // Path alias for shadcn/ui imports
@@ -23,7 +32,6 @@ export default defineConfig({
         manualChunks: {
           // Split vendor libraries into separate chunks
           'react-vendor': ['react', 'react-dom'],
-          'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
           'pdf': ['pdfjs-dist'],
           'katex': ['katex'],
           'markdown': ['react-markdown', 'remark-math', 'rehype-katex'],

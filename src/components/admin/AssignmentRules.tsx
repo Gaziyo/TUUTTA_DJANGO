@@ -100,7 +100,7 @@ export const AssignmentRules: React.FC = () => {
       loadCourses();
       loadDepartments();
       loadTeams();
-      // In a real app, fetch rules from Firestore
+      // In production, fetch rules from backend API
       // For now, using local state with sample rules
     }
   }, [currentOrg?.id, loadCourses, loadDepartments, loadTeams]);

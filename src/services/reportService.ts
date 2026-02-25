@@ -373,7 +373,7 @@ export const reportService = {
 
 };
 
-// Helper to convert Firestore timestamp to Date
+// Helper to convert timestamp-like values to Date
 function toDate(timestamp: any): Date {
   if (!timestamp) return new Date();
   if (timestamp.toDate) return timestamp.toDate();

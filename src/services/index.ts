@@ -32,5 +32,5 @@ export { baselineDiagnosticService } from './baselineDiagnosticService';
 export { interventionService } from './interventionService';
 export * as guidedService from './guidedService';
 
-// Canonical services (direct Firestore access with schema.ts types)
+// Canonical services (Django-backed data model adapters)
 export * as canonical from './canonical';

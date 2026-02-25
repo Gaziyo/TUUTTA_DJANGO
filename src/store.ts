@@ -433,7 +433,7 @@ export const useStore = create<AppState>()(
 
         const newFiles = [...userData.files, file];
 
-        // Sync with Firestore
+        // Sync with backend/client persistence adapter
         dataGateway.legacy.addFile(state.user.id, file).catch(console.error);
 
         // Check for "File Explorer" achievement (3 different file types)
@@ -483,7 +483,7 @@ export const useStore = create<AppState>()(
         const fileToRemove = userData.files.find(f => f.id === fileId);
 
         if (fileToRemove) {
-          // Delete from storage if it's a URL (assuming it's a Firebase Storage URL)
+          // Delete from storage if it's a remote URL
           if (fileToRemove.content.startsWith('http')) {
             try {
               await storageService.deleteFile(fileToRemove.content);
@@ -492,7 +492,7 @@ export const useStore = create<AppState>()(
             }
           }
 
-          // Delete from Firestore
+          // Delete via persistence adapter
           await dataGateway.legacy.deleteFile(state.user.id, fileId);
 
           set(state => ({

@@ -1,7 +1,6 @@
 /**
  * Course Service — Django REST API implementation.
  *
- * Replaces the previous Firestore implementation.
  * All course operations go through this service using the Django backend.
  */
 

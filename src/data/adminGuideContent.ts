@@ -207,22 +207,22 @@ export const guideContent: Record<string, GuideContent> = {
       },
       {
         title: 'Step 2: Configure Environment Variables',
-        description: 'Copy .env.example to .env and configure: Firebase credentials, API keys, and feature flags.',
+        description: 'Copy .env.example to .env and configure: API endpoints, API keys, and feature flags.',
         tip: 'Never commit .env files to version control - use environment-specific configs.'
       },
       {
         title: 'Step 3: Database Setup',
-        description: 'Configure Firebase Firestore collections. The app will auto-create required collections on first run.',
-        tip: 'Enable Firestore security rules before going to production.'
+        description: 'Configure Django database settings and run migrations for your PostgreSQL environment.',
+        tip: 'Validate database connectivity and migration health before production rollout.'
       },
       {
         title: 'Step 4: Authentication Setup',
-        description: 'Configure Firebase Authentication providers: Email/Password, Google, Microsoft, or SAML SSO.',
+        description: 'Configure Django authentication flow (JWT/login endpoints) and any external SSO provider integration.',
         tip: 'Start with email/password for testing, add SSO later for enterprise deployment.'
       },
       {
         title: 'Step 5: Build and Deploy',
-        description: 'Run npm run build to create production bundles. Deploy to your hosting provider (Vercel, Netlify, or Firebase Hosting).',
+        description: 'Run npm run build to create production bundles. Deploy frontend to your host and backend to Render.',
         tip: 'Use preview deployments for testing before pushing to production.'
       },
       {

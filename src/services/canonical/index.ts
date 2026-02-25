@@ -1,21 +1,10 @@
 /**
  * Canonical Service Layer
  *
- * This is the single source of truth for all Firestore operations.
- * Components MUST use these services — NEVER call Firestore directly.
+ * This is the single source of truth for core data operations.
+ * Components MUST use these services — NEVER bypass the service layer.
  *
- * Collection Map:
- *   /users/{uid}
- *   /organizations/{orgId}
- *   /courses/{courseId}
- *   /courses/{courseId}/modules/{moduleId}
- *   /courses/{courseId}/modules/{moduleId}/lessons/{lessonId}
- *   /assessments/{assessmentId}
- *   /enrollments/{orgId}_{userId}_{courseId}
- *   /progress/{userId}_{courseId}
- *   /progress/{userId}_{courseId}/events/{eventId}
- *   /assessmentResults/{resultId}
- *   /activityLog/{orgId}/events/{eventId}
+ * Backed by Django REST endpoints under /api/v1.
  */
 
 // Activity logging (fire-and-forget)

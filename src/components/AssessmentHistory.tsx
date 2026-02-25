@@ -11,7 +11,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { useStore } from '../store';
-import * as firestoreService from '../lib/firestoreService';
+import * as clientPersistenceService from '../lib/clientPersistenceService';
 
 interface AssessmentQuestion {
   id: string;
@@ -44,7 +44,7 @@ const AssessmentHistory: React.FC = () => {
 
     try {
       setLoading(true);
-      const results = await firestoreService.getAssessments(user.id) as AssessmentResult[];
+      const results = await clientPersistenceService.getAssessments(user.id) as AssessmentResult[];
       // Sort by completion date (newest first)
       const sorted = [...results].sort((a, b) => b.completedAt - a.completedAt);
       setAssessments(sorted);
@@ -63,7 +63,7 @@ const AssessmentHistory: React.FC = () => {
     if (!user || !confirm('Are you sure you want to delete this assessment?')) return;
 
     try {
-      await firestoreService.deleteAssessment(user.id, assessmentId);
+      await clientPersistenceService.deleteAssessment(user.id, assessmentId);
       setAssessments(prev => prev.filter(a => a.id !== assessmentId));
       if (selectedAssessment?.id === assessmentId) {
         setSelectedAssessment(null);

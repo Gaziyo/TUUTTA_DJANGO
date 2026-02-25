@@ -6,7 +6,7 @@
  *   GET/PATCH /progress/{id}/ — individual record (with nested lesson/module progress)
  *
  * All progress tracking goes through this service.
- * Components NEVER call Firestore directly.
+ * Components should not bypass this layer.
  */
 
 import { apiClient } from '../../lib/api';

@@ -1,4 +1,4 @@
-// Local Timestamp stub — replaces firebase/firestore Timestamp for legacy schema types
+// Local Timestamp stub used by legacy schema shapes.
 interface Timestamp {
   seconds: number;
   nanoseconds: number;
@@ -13,7 +13,7 @@ export type UserRole = 'superadmin' | 'admin' | 'manager' | 'instructor' | 'lear
 /**
  * Role hierarchy — higher index = higher privilege.
  * This is the single source of truth for role ordering.
- * Used in RouteGuard, Firestore rules logic, and permission checks.
+ * Used in RouteGuard and permission checks.
  */
 export const ROLE_HIERARCHY: readonly UserRole[] = [
   'learner',

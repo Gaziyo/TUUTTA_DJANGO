@@ -2,7 +2,7 @@
  * ELS Context Provider
  * 
  * Provides state management and data access for the Enterprise Learning System (ELS).
- * This context integrates with Firebase/Firestore and provides real-time data sync.
+ * This context integrates with Django-backed services for ELS workflows.
  */
 
 import React, { createContext, useContext, useCallback, useState, useEffect, useMemo, useRef } from 'react';
