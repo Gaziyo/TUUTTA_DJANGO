@@ -41,17 +41,26 @@ export function useAuth(): AuthState {
   const { user, isAuthenticated, isLoading, fetchCurrentUser } = useAuthStore();
   const lmsMemberRole = useLMSStore((state) => state.currentMember?.role ?? null);
   const lmsOrgId = useLMSStore((state) => state.currentOrg?.id ?? null);
+  const hasAccessToken =
+    typeof window !== 'undefined' && !!window.localStorage.getItem('accessToken');
 
-  // Re-fetch user profile on mount if we have a token but no user object yet
+  // Keep persisted auth state consistent with token presence.
+  // This prevents "ghost login" UI when user data was persisted but tokens are missing/expired.
   useEffect(() => {
-    if (isAuthenticated && !user) {
+    if (!hasAccessToken && (isAuthenticated || user)) {
+      useAuthStore.setState({ user: null, isAuthenticated: false });
+      return;
+    }
+    if (hasAccessToken && isAuthenticated && !user) {
       fetchCurrentUser();
     }
-  }, [isAuthenticated, user, fetchCurrentUser]);
+  }, [hasAccessToken, isAuthenticated, user, fetchCurrentUser]);
 
   const role = mapLmsRoleToCanonical(lmsMemberRole) ?? 'learner';
   const orgId = lmsOrgId ?? null;
   const uid = user?.id ?? null;
+  const loading = isLoading || (hasAccessToken && isAuthenticated && !user);
+  const authenticated = hasAccessToken && isAuthenticated && !!user;
 
   const isAdmin = role === 'admin' || role === 'superadmin';
   const isManagerOrAbove = isAdmin || role === 'manager';
@@ -62,8 +71,8 @@ export function useAuth(): AuthState {
     user,
     role,
     orgId,
-    loading: isLoading,
-    isAuthenticated,
+    loading,
+    isAuthenticated: authenticated,
     isAdmin,
     isManagerOrAbove,
     isInstructorOrAbove,

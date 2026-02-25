@@ -281,7 +281,9 @@ export const useLMSStore = create<LMSState>()(
         try {
           // Ensure user is authenticated
           const authUser = useAuthStore.getState().user;
-          if (!authUser) {
+          const accessToken =
+            typeof window !== 'undefined' ? window.localStorage.getItem('accessToken') : null;
+          if (!authUser || !accessToken) {
             throw new Error('Authentication required. Please sign in properly.');
           }
 
@@ -336,17 +338,36 @@ export const useLMSStore = create<LMSState>()(
             createdBy: authUserId,
           });
           const creatorName = creator?.name?.trim() || 'Organization Owner';
-          const creatorEmail = creator?.email?.trim() || `owner@${slug}.example`;
-          const member = await userService.addMember({
-            odId: org.id,
-            orgId: org.id,
-            userId: authUserId,
-            email: creatorEmail,
-            name: creatorName,
-            role: 'org_admin',
-            status: 'active',
-            joinedAt: Date.now(),
-          });
+          const creatorEmail = creator?.email?.trim() || authUser.email || `owner@${slug}.example`;
+
+          // Backend already auto-creates org_admin membership on organization create.
+          // Resolve membership from backend when available, but do not fail organization creation
+          // if this lookup endpoint is unavailable on a deployed backend revision.
+          let member = null;
+          try {
+            const memberships = await userService.listMembershipsForUser(authUserId);
+            member = memberships.find((item) => (item.orgId ?? item.odId) === org.id) ?? null;
+            if (!member) {
+              member = await userService.getMemberByEmail(org.id, creatorEmail);
+            }
+          } catch (membershipError) {
+            console.warn('Membership lookup failed after organization creation:', membershipError);
+          }
+
+          if (!member) {
+            member = {
+              id: `${org.id}_${authUserId}`,
+              odId: org.id,
+              orgId: org.id,
+              userId: authUserId,
+              email: creatorEmail,
+              name: creatorName,
+              role: 'org_admin',
+              status: 'active',
+              joinedAt: Date.now(),
+            };
+          }
+
           set({
             currentOrg: org,
             currentMember: member,
