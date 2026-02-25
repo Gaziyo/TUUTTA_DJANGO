@@ -19,6 +19,11 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth, hasRoleAccess } from './useAuth';
 import type { UserRole } from '../../types/schema';
 
+const normalizePath = (path: string): string => {
+  if (!path) return '/';
+  return path.length > 1 ? path.replace(/\/+$/, '') : path;
+};
+
 // Full-page spinner for loading state
 const FullPageSpinner = () => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -60,6 +65,9 @@ export function RouteGuard({
 }: RouteGuardProps) {
   const { role, loading, isAuthenticated } = useAuth();
   const location = useLocation();
+  const currentPath = normalizePath(location.pathname);
+  const normalizedLoginRedirect = normalizePath(loginRedirect);
+  const normalizedUnauthorizedRedirect = normalizePath(unauthorizedRedirect);
 
   // Show loading spinner while auth state is being determined
   if (loading) {
@@ -69,7 +77,7 @@ export function RouteGuard({
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
     // Prevent redirect loops if guard is ever rendered on the login route.
-    if (location.pathname === loginRedirect) {
+    if (currentPath === normalizedLoginRedirect) {
       return <>{children || <Outlet />}</>;
     }
     return (
@@ -84,7 +92,7 @@ export function RouteGuard({
   // Check role access
   if (!hasRoleAccess(role, allowedRoles)) {
     // Prevent infinite replaceState loops when redirect target is the current route.
-    if (location.pathname === unauthorizedRedirect) {
+    if (currentPath === normalizedUnauthorizedRedirect) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
           <div className="max-w-md text-center">

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Eye, EyeOff } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../lib/authStore';
 import { useStore, DEFAULT_SETTINGS } from '../store';
@@ -24,6 +25,12 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode = 'l
   const isDarkMode = user?.settings?.theme === 'dark';
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setMode(initialMode);
+    setError(null);
+  }, [initialMode, isOpen]);
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -103,9 +110,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode = 'l
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg p-8 w-full max-w-md relative`}>
+  const modal = (
+    <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg p-8 w-full max-w-md relative my-6`}>
         <button
           type="button"
           title="Close modal"
@@ -244,6 +251,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode = 'l
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return modal;
+  return createPortal(modal, document.body);
 };
 
 export default AuthModal;

@@ -23,6 +23,7 @@ import { AppContextProvider, useAppContext } from './context/AppContext';
 import { GuidedPipelineProvider } from './context/GuidedPipelineContext';
 import { ToastProvider } from './components/ui/toast-provider';
 import { AdminRoute, LearnerRoute } from './components/auth/RouteGuard';
+import { useAuth } from './components/auth/useAuth';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { Skeleton, AdminTableSkeleton } from './components/ui/skeleton';
 import AppFooter from './components/layout/AppFooter';
@@ -869,12 +870,29 @@ function AppContent() {
     currentRoute,
     navigate,
   } = useAppContext();
-  const { user } = useStore();
+  const { user, setUser } = useStore();
+  const { isAuthenticated, loading: authLoading, user: authUser } = useAuth();
   const settings = useStore(state => {
     if (!state.user) return null;
     return state.userData[state.user.id]?.settings ?? null;
   });
   const isDarkMode = (settings?.theme ?? 'light') === 'dark';
+
+  // Keep legacy app store user in sync with canonical auth state to avoid routing mismatches.
+  useEffect(() => {
+    if (isAuthenticated && authUser && !user) {
+      setUser({
+        id: authUser.id,
+        email: authUser.email,
+        name: authUser.display_name || authUser.username,
+        settings: DEFAULT_SETTINGS,
+      });
+      return;
+    }
+    if (!isAuthenticated && user) {
+      setUser(null);
+    }
+  }, [isAuthenticated, authUser, user, setUser]);
 
   // Apply dark mode class to document
   useEffect(() => {
@@ -903,8 +921,12 @@ function AppContent() {
 
   const isLegalRoute = currentRoute === '/privacy' || currentRoute === '/terms' || currentRoute === '/security';
 
+  if (authLoading) {
+    return <LoadingSpinner />;
+  }
+
   // Not logged in - show legal pages or welcome screen
-  if (!user) {
+  if (!isAuthenticated) {
     if (isLegalRoute) {
       return (
         <div className={`min-h-screen flex flex-col ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -1344,6 +1366,7 @@ function RouterSync() {
 function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
   const { openCourse, exitPath, currentRoute } = useAppContext();
   const { user } = useStore();
+  const { isAuthenticated } = useAuth();
   const {
     courses,
     enrollments,
@@ -1527,13 +1550,17 @@ function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
   }) => (isEnterpriseFeatureEnabled(flag) ? element : <Navigate to="/admin/dashboard" replace />);
 
   const AuthRoutePage = ({ mode }: { mode: 'login' | 'register' }) => (
-    <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-gray-950' : 'bg-gray-100'}`}>
-      <AuthModal
-        isOpen
-        onClose={() => {}}
-        initialMode={mode}
-      />
-    </div>
+    isAuthenticated ? (
+      <Navigate to="/home" replace />
+    ) : (
+      <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-gray-950' : 'bg-gray-100'}`}>
+        <AuthModal
+          isOpen
+          onClose={() => {}}
+          initialMode={mode}
+        />
+      </div>
+    )
   );
 
   // ensure learning path data is ready for deep links
@@ -1550,53 +1577,53 @@ function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
           <Route path="/login" element={<AuthRoutePage mode="login" />} />
-        <Route path="/signup" element={<AuthRoutePage mode="register" />} />
-        <Route element={<LearnerRoute />}>
-          <Route path="/" element={<HomeDashboard isDarkMode={isDarkMode} />} />
-          <Route path="/home" element={<HomeDashboard isDarkMode={isDarkMode} />} />
-          <Route path="/courses" element={<MyCoursesPage isDarkMode={isDarkMode} />} />
-          <Route path="/paths" element={<LearningPathsPage isDarkMode={isDarkMode} />} />
-          <Route path="/join-org" element={<JoinOrganizationPage isDarkMode={isDarkMode} />} />
-          <Route path="/app-admin" element={<AppAdminGuide isDarkMode={isDarkMode} />} />
-          <Route path="/discussions" element={<DiscussionForum isDarkMode={isDarkMode} />} />
-          <Route path="/progress" element={<LearnerDashboard isDarkMode={isDarkMode} />} />
-          <Route path="/analytics" element={<AnalyticsDashboard />} />
-          <Route
-            path="/announcements"
-            element={
-              <AnnouncementsCenter
-                announcements={announcements}
-                courses={courses.map(c => ({ id: c.id, title: c.title }))}
-                teams={teams.map(t => ({ id: t.id, name: t.name }))}
-                onCreateAnnouncement={handleCreateAnnouncement}
-                onUpdateAnnouncement={handleUpdateAnnouncement}
-                onDeleteAnnouncement={handleDeleteAnnouncement}
-                onPublishAnnouncement={handlePublishAnnouncement}
-                currentUserId={user?.id || ''}
-                isDarkMode={isDarkMode}
-              />
-            }
-          />
-          <Route path="/chat" element={<MainContent isDarkMode={isDarkMode} />} />
-          <Route path="/notes" element={<NotePanel />} />
-          <Route path="/files" element={<FileUploadPanel />} />
-          <Route path="/assessments" element={<AssessmentPanel />} />
-          <Route path="/privacy" element={<PrivacyPage isDarkMode={isDarkMode} />} />
-          <Route path="/terms" element={<TermsPage isDarkMode={isDarkMode} />} />
-          <Route path="/security" element={<SecurityPage isDarkMode={isDarkMode} />} />
+          <Route path="/signup" element={<AuthRoutePage mode="register" />} />
+          <Route element={<LearnerRoute />}>
+            <Route path="/" element={<HomeDashboard isDarkMode={isDarkMode} />} />
+            <Route path="/home" element={<HomeDashboard isDarkMode={isDarkMode} />} />
+            <Route path="/courses" element={<MyCoursesPage isDarkMode={isDarkMode} />} />
+            <Route path="/paths" element={<LearningPathsPage isDarkMode={isDarkMode} />} />
+            <Route path="/join-org" element={<JoinOrganizationPage isDarkMode={isDarkMode} />} />
+            <Route path="/app-admin" element={<AppAdminGuide isDarkMode={isDarkMode} />} />
+            <Route path="/discussions" element={<DiscussionForum isDarkMode={isDarkMode} />} />
+            <Route path="/progress" element={<LearnerDashboard isDarkMode={isDarkMode} />} />
+            <Route path="/analytics" element={<AnalyticsDashboard />} />
+            <Route
+              path="/announcements"
+              element={
+                <AnnouncementsCenter
+                  announcements={announcements}
+                  courses={courses.map(c => ({ id: c.id, title: c.title }))}
+                  teams={teams.map(t => ({ id: t.id, name: t.name }))}
+                  onCreateAnnouncement={handleCreateAnnouncement}
+                  onUpdateAnnouncement={handleUpdateAnnouncement}
+                  onDeleteAnnouncement={handleDeleteAnnouncement}
+                  onPublishAnnouncement={handlePublishAnnouncement}
+                  currentUserId={user?.id || ''}
+                  isDarkMode={isDarkMode}
+                />
+              }
+            />
+            <Route path="/chat" element={<MainContent isDarkMode={isDarkMode} />} />
+            <Route path="/notes" element={<NotePanel />} />
+            <Route path="/files" element={<FileUploadPanel />} />
+            <Route path="/assessments" element={<AssessmentPanel />} />
+            <Route path="/privacy" element={<PrivacyPage isDarkMode={isDarkMode} />} />
+            <Route path="/terms" element={<TermsPage isDarkMode={isDarkMode} />} />
+            <Route path="/security" element={<SecurityPage isDarkMode={isDarkMode} />} />
 
-          <Route path="/course/:courseId" element={<Navigate to="home" replace />} />
-          <Route path="/course/:courseId/home" element={<CourseHomeRoute />} />
-          <Route path="/course/:courseId/player" element={<CoursePlayerRoute />} />
-          <Route path="/course/:courseId/outline" element={<CourseOutlineRoute />} />
-          <Route path="/course/:courseId/resources" element={<CourseResourcesRoute />} />
-          <Route path="/course/:courseId/notes" element={<NotePanel />} />
+            <Route path="/course/:courseId" element={<Navigate to="home" replace />} />
+            <Route path="/course/:courseId/home" element={<CourseHomeRoute />} />
+            <Route path="/course/:courseId/player" element={<CoursePlayerRoute />} />
+            <Route path="/course/:courseId/outline" element={<CourseOutlineRoute />} />
+            <Route path="/course/:courseId/resources" element={<CourseResourcesRoute />} />
+            <Route path="/course/:courseId/notes" element={<NotePanel />} />
 
-          <Route path="/path/:pathId" element={<Navigate to="overview" replace />} />
-          <Route path="/path/:pathId/overview" element={<PathViewerRoute view="overview" />} />
-          <Route path="/path/:pathId/current" element={<PathViewerRoute view="current" />} />
-          <Route path="/path/:pathId/milestones" element={<PathViewerRoute view="milestones" />} />
-        </Route>
+            <Route path="/path/:pathId" element={<Navigate to="overview" replace />} />
+            <Route path="/path/:pathId/overview" element={<PathViewerRoute view="overview" />} />
+            <Route path="/path/:pathId/current" element={<PathViewerRoute view="current" />} />
+            <Route path="/path/:pathId/milestones" element={<PathViewerRoute view="milestones" />} />
+          </Route>
 
         <Route element={<AdminRoute />}>
           <Route
