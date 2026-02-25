@@ -19,6 +19,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useStore } from '../../store';
+import { useAuthStore } from '../../lib/authStore';
 import { useAppContext } from '../../context/AppContext';
 import LeftNavigation from './LeftNavigation';
 import AppFooter from './AppFooter';
@@ -141,7 +142,9 @@ export default function UnifiedLayout({
 
   // Handle logout
   const handleLogout = () => {
+    useAuthStore.getState().logout();
     setUser(null);
+    navigate('/');
     setShowUserMenu(false);
   };
 
