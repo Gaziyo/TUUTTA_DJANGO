@@ -24,9 +24,13 @@ export interface FailureRiskSnapshot {
 
 export const adaptiveRecommendationService = {
   listForOrg: async (orgId: string): Promise<AdaptiveRecommendation[]> => {
-    const { data } = await apiClient.get(`/organizations/${orgId}/adaptive-recommendations/`);
-    const results = Array.isArray(data) ? data : (data.results ?? []);
-    return results as AdaptiveRecommendation[];
+    try {
+      const { data } = await apiClient.get(`/organizations/${orgId}/adaptive-recommendations/`);
+      const results = Array.isArray(data) ? data : (data.results ?? []);
+      return results as AdaptiveRecommendation[];
+    } catch {
+      return [];
+    }
   },
 
   recalcForOrg: async (orgId: string): Promise<void> => {
@@ -36,9 +40,13 @@ export const adaptiveRecommendationService = {
   },
 
   listFailureRisks: async (orgId: string): Promise<FailureRiskSnapshot[]> => {
-    const { data } = await apiClient.get(`/organizations/${orgId}/failure-risks/`);
-    const results = Array.isArray(data) ? data : (data.results ?? []);
-    return results as FailureRiskSnapshot[];
+    try {
+      const { data } = await apiClient.get(`/organizations/${orgId}/failure-risks/`);
+      const results = Array.isArray(data) ? data : (data.results ?? []);
+      return results as FailureRiskSnapshot[];
+    } catch {
+      return [];
+    }
   },
 
   recalcFailureRisks: async (orgId: string): Promise<void> => {
