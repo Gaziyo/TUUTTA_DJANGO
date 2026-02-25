@@ -17,7 +17,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
-import { useStore } from './store';
+import { useStore, DEFAULT_SETTINGS } from './store';
 import { useLMSStore } from './store/lmsStore';
 import { AppContextProvider, useAppContext } from './context/AppContext';
 import { GuidedPipelineProvider } from './context/GuidedPipelineContext';
