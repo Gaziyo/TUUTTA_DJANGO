@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from .models import KnowledgeDocument, KnowledgeChunk, KnowledgeNode, KnowledgeEdge
 from .services import (
-    extract_text_for_document,
+    extract_text_for_document_with_status,
     semantic_chunk_text,
     chunk_text,
     estimate_tokens,
@@ -17,6 +17,9 @@ from .services import (
 )
 
 
+MAX_INGEST_RETRIES = 3
+
+
 @shared_task
 def ingest_knowledge_document_task(document_id: str, trigger_analyze: bool = True) -> str:
     try:
@@ -24,17 +27,52 @@ def ingest_knowledge_document_task(document_id: str, trigger_analyze: bool = Tru
     except KnowledgeDocument.DoesNotExist:
         return 'missing'
 
+    metadata = document.metadata or {}
+    ingest_attempt = int(metadata.get('ingest_attempt', 0)) + 1
+
     document.status = 'processing'
     document.error_message = ''
-    document.metadata = {**(document.metadata or {}), 'ingest_started_at': timezone.now().isoformat()}
+    document.metadata = {
+        **metadata,
+        'ingest_started_at': timezone.now().isoformat(),
+        'ingest_attempt': ingest_attempt,
+        'ingest_max_retries': MAX_INGEST_RETRIES,
+    }
     document.save(update_fields=['status', 'error_message', 'metadata', 'updated_at'])
 
-    text = extract_text_for_document(document)
+    extraction = extract_text_for_document_with_status(document)
+    text = extraction.get('text', '')
+    error = extraction.get('error')
     if not text:
+        retryable = bool((error or {}).get('retryable', False))
+        should_retry = retryable and ingest_attempt < MAX_INGEST_RETRIES
+        error_code = (error or {}).get('error_code', 'NO_CONTENT_EXTRACTED')
+        message = (error or {}).get('message', 'No content extracted from document.')
+
         document.status = 'failed'
-        document.error_message = 'No content extracted. Provide content_text or configure OCR/transcription.'
-        document.metadata = {**(document.metadata or {}), 'ingest_failed_at': timezone.now().isoformat()}
+        document.error_message = f'[{error_code}] {message}'
+        document.metadata = {
+            **(document.metadata or {}),
+            'ingest_failed_at': timezone.now().isoformat(),
+            'ingest_error': {
+                'error_code': error_code,
+                'message': message,
+                'retryable': retryable,
+                'attempt': ingest_attempt,
+                'max_retries': MAX_INGEST_RETRIES,
+                'details': (error or {}).get('details', {}),
+            },
+        }
         document.save(update_fields=['status', 'error_message', 'metadata', 'updated_at'])
+
+        if should_retry:
+            ingest_knowledge_document_task.delay(document_id=document_id, trigger_analyze=trigger_analyze)
+            document.metadata = {
+                **(document.metadata or {}),
+                'ingest_retry_scheduled_at': timezone.now().isoformat(),
+                'ingest_next_attempt': ingest_attempt + 1,
+            }
+            document.save(update_fields=['metadata', 'updated_at'])
         return 'failed'
 
     chunks = semantic_chunk_text(text)

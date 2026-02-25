@@ -1,7 +1,14 @@
 import uuid
 from django.utils.text import slugify
 from rest_framework import serializers
-from .models import Course, CourseModule, Lesson, AdaptiveReleaseRule
+from .models import (
+    Course,
+    CourseModule,
+    Lesson,
+    AdaptiveReleaseRule,
+    LearningPath,
+    LearningPathCourse,
+)
 
 
 class LessonSerializer(serializers.ModelSerializer):
@@ -65,3 +72,61 @@ class AdaptiveReleaseRuleSerializer(serializers.ModelSerializer):
             'is_active', 'metadata', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class LearningPathCourseSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source='course.title', read_only=True)
+
+    class Meta:
+        model = LearningPathCourse
+        fields = [
+            'id', 'learning_path', 'course', 'course_title',
+            'order_index', 'is_required', 'unlock_after',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class LearningPathSerializer(serializers.ModelSerializer):
+    path_courses = LearningPathCourseSerializer(many=True, read_only=True)
+    courses = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
+
+    class Meta:
+        model = LearningPath
+        fields = [
+            'id', 'organization', 'title', 'description', 'thumbnail_url',
+            'estimated_duration', 'status', 'created_by',
+            'path_courses', 'courses',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def _sync_courses(self, learning_path: LearningPath, courses_payload: list[dict]) -> None:
+        LearningPathCourse.objects.filter(learning_path=learning_path).delete()
+        for index, raw in enumerate(courses_payload):
+            course_id = raw.get('course') or raw.get('course_id')
+            if not course_id:
+                continue
+            order_index = raw.get('order_index', raw.get('order', index))
+            unlock_after = raw.get('unlock_after')
+            LearningPathCourse.objects.create(
+                learning_path=learning_path,
+                course_id=course_id,
+                order_index=int(order_index or 0),
+                is_required=bool(raw.get('is_required', raw.get('isRequired', True))),
+                unlock_after_id=unlock_after or None,
+            )
+
+    def create(self, validated_data):
+        courses_payload = validated_data.pop('courses', [])
+        learning_path = super().create(validated_data)
+        if courses_payload:
+            self._sync_courses(learning_path, courses_payload)
+        return learning_path
+
+    def update(self, instance, validated_data):
+        courses_payload = validated_data.pop('courses', None)
+        learning_path = super().update(instance, validated_data)
+        if courses_payload is not None:
+            self._sync_courses(learning_path, courses_payload)
+        return learning_path

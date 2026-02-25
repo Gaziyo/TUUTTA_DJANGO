@@ -7,7 +7,14 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.accounts.views import RegisterView, LoginView, LogoutView, CurrentUserView
 from apps.organizations.views import OrganizationViewSet, DepartmentViewSet, TeamViewSet, MyMembershipsView, OrganizationMemberViewSet, MemberDetailView
-from apps.courses.views import CourseViewSet, CourseModuleViewSet, LessonViewSet, AdaptiveReleaseRuleViewSet
+from apps.courses.views import (
+    CourseViewSet,
+    CourseModuleViewSet,
+    LessonViewSet,
+    AdaptiveReleaseRuleViewSet,
+    LearningPathViewSet,
+    LearningPathCourseViewSet,
+)
 from apps.assessments.views import AssessmentViewSet, QuestionViewSet
 from apps.enrollments.views import EnrollmentViewSet
 from apps.progress.views import ProgressViewSet
@@ -29,6 +36,7 @@ from apps.learning_intelligence.views import (
     CognitiveProfileViewSet,
     GapMatrixViewSet,
     RemediationTriggerViewSet,
+    RemediationAssignmentViewSet,
     AdaptivePolicyViewSet,
     AdaptiveRecommendationViewSet,
     AdaptiveDecisionLogViewSet,
@@ -89,6 +97,7 @@ orgs_router = nested_routers.NestedDefaultRouter(router, r'organizations', looku
 orgs_router.register(r'departments', DepartmentViewSet, basename='organization-departments')
 orgs_router.register(r'teams', TeamViewSet, basename='organization-teams')
 orgs_router.register(r'members', OrganizationMemberViewSet, basename='organization-members')
+orgs_router.register(r'learning-paths', LearningPathViewSet, basename='organization-learning-paths')
 # Cognitive OS nested routes
 orgs_router.register(r'competency-frameworks', CompetencyFrameworkViewSet, basename='organization-competency-frameworks')
 orgs_router.register(r'competencies', CompetencyViewSet, basename='organization-competencies')
@@ -104,6 +113,7 @@ orgs_router.register(r'knowledge-edges', KnowledgeEdgeViewSet, basename='organiz
 orgs_router.register(r'cognitive-profiles', CognitiveProfileViewSet, basename='organization-cognitive-profiles')
 orgs_router.register(r'gap-matrix', GapMatrixViewSet, basename='organization-gap-matrix')
 orgs_router.register(r'remediation-triggers', RemediationTriggerViewSet, basename='organization-remediation-triggers')
+orgs_router.register(r'remediation-assignments', RemediationAssignmentViewSet, basename='organization-remediation-assignments')
 orgs_router.register(r'adaptive-policies', AdaptivePolicyViewSet, basename='organization-adaptive-policies')
 orgs_router.register(r'adaptive-recommendations', AdaptiveRecommendationViewSet, basename='organization-adaptive-recommendations')
 orgs_router.register(r'adaptive-decisions', AdaptiveDecisionLogViewSet, basename='organization-adaptive-decisions')
@@ -136,6 +146,9 @@ orgs_router.register(r'human-overrides', HumanOverrideViewSet, basename='organiz
 # ELS Pipeline routes
 orgs_router.register(r'els-projects', ELSProjectViewSet, basename='organization-els-projects')
 
+learning_paths_router = nested_routers.NestedDefaultRouter(orgs_router, r'learning-paths', lookup='learning_path')
+learning_paths_router.register(r'courses', LearningPathCourseViewSet, basename='learning-path-courses')
+
 urlpatterns = [
     path('admin/', admin.site.urls),
 
@@ -158,6 +171,7 @@ urlpatterns = [
         path('', include(modules_router.urls)),
         path('', include(assessments_router.urls)),
         path('', include(orgs_router.urls)),
+        path('', include(learning_paths_router.urls)),
 
         # Genie / ELS
         path('genie/', include('apps.genie.urls')),

@@ -67,6 +67,21 @@ class GapMatrix(models.Model):
     target_bloom_level = models.IntegerField(default=0)    # required level for role (0-6)
     gap_score = models.FloatField(default=0.0)             # normalised 0.0–1.0
 
+    # Weighted-gap components (Week 1 P0)
+    bloom_gap_component = models.FloatField(default=0.0)
+    modality_gap_component = models.FloatField(default=0.0)
+    threshold_gap_component = models.FloatField(default=0.0)
+    role_requirement_component = models.FloatField(default=0.0)
+
+    weighted_bloom_gap = models.FloatField(default=0.0)
+    weighted_modality_gap = models.FloatField(default=0.0)
+    bloom_weight = models.FloatField(default=1.0)
+    modality_weight = models.FloatField(default=1.0)
+
+    threshold_score_target = models.FloatField(default=0.75)
+    learner_score = models.FloatField(default=0.0)
+    gap_details = models.JSONField(default=dict)
+
     priority = models.IntegerField(default=3)              # 1 (critical) – 5 (low)
 
     recommended_course = models.ForeignKey(
@@ -136,6 +151,65 @@ class RemediationTrigger(models.Model):
 
     def __str__(self):
         return f'RemediationTrigger({self.organization_id})'
+
+
+class RemediationAssignment(models.Model):
+    STATUSES = [
+        ('assigned', 'Assigned'),
+        ('completed', 'Completed'),
+        ('dismissed', 'Dismissed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='remediation_assignments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='remediation_assignments')
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_remediation_assignments',
+    )
+    trigger = models.ForeignKey(
+        RemediationTrigger,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assignments',
+    )
+    enrollment = models.ForeignKey(
+        'enrollments.Enrollment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='remediation_assignments',
+    )
+    course = models.ForeignKey(
+        'courses.Course',
+        on_delete=models.CASCADE,
+        related_name='remediation_assignments',
+    )
+
+    module_id = models.CharField(max_length=100, blank=True)
+    lesson_id = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default='assigned')
+    reason = models.TextField(blank=True)
+    scheduled_reassessment_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'remediation_assignments'
+        indexes = [
+            models.Index(fields=['organization', 'status']),
+            models.Index(fields=['user']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f'RemediationAssignment({self.user_id}, {self.course_id}, {self.status})'
 
 
 class AdaptivePolicy(models.Model):

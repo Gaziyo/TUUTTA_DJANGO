@@ -2,11 +2,20 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
-from .models import Course, CourseModule, Lesson, AdaptiveReleaseRule
+from .models import (
+    Course,
+    CourseModule,
+    Lesson,
+    AdaptiveReleaseRule,
+    LearningPath,
+    LearningPathCourse,
+)
 from .serializers import (
     CourseSerializer, CourseDetailSerializer,
     CourseModuleSerializer, LessonSerializer,
     AdaptiveReleaseRuleSerializer,
+    LearningPathSerializer,
+    LearningPathCourseSerializer,
 )
 from .services import get_module_unlock_status
 
@@ -91,3 +100,51 @@ class AdaptiveReleaseRuleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         course_id = self.kwargs.get('course_pk') or self.request.data.get('course')
         serializer.save(course_id=course_id)
+
+
+class LearningPathViewSet(viewsets.ModelViewSet):
+    serializer_class = LearningPathSerializer
+    filterset_fields = ['status']
+    search_fields = ['title', 'description']
+    ordering_fields = ['created_at', 'title']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        org_id = self.kwargs.get('organization_pk') or self.request.query_params.get('organization')
+        user = self.request.user
+        qs = LearningPath.objects.select_related('organization', 'created_by').prefetch_related('path_courses__course')
+        if org_id:
+            qs = qs.filter(organization_id=org_id)
+        else:
+            qs = qs.filter(organization__members__user=user)
+        return qs.distinct()
+
+    def perform_create(self, serializer):
+        org_id = self.kwargs.get('organization_pk') or self.request.data.get('organization')
+        serializer.save(organization_id=org_id, created_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def publish(self, request, pk=None):
+        learning_path = self.get_object()
+        learning_path.status = 'published'
+        learning_path.save(update_fields=['status', 'updated_at'])
+        return Response({'status': 'published'})
+
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        learning_path = self.get_object()
+        learning_path.status = 'archived'
+        learning_path.save(update_fields=['status', 'updated_at'])
+        return Response({'status': 'archived'})
+
+
+class LearningPathCourseViewSet(viewsets.ModelViewSet):
+    serializer_class = LearningPathCourseSerializer
+
+    def get_queryset(self):
+        return LearningPathCourse.objects.filter(
+            learning_path_id=self.kwargs['learning_path_pk']
+        ).select_related('course').order_by('order_index', 'created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(learning_path_id=self.kwargs['learning_path_pk'])

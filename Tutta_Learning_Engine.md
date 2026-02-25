@@ -6353,3 +6353,48 @@ LEARNER opens HomeDashboard → sees course
     │
     ▼
 Loop: new content ingested → cycle repeats
+
+---
+
+## 2-Week Execution Plan to Reach 100% Completion
+
+### Window
+- Sprint dates: February 25, 2026 → March 10, 2026 (10 working days)
+
+### Week 1 (P0 Core Intelligence)
+
+Day 1–2 (BE + ML)
+- Upgrade `GapMatrix` schema to store weighted components (Bloom/modality/threshold parts), add migration + backfill.
+- Acceptance: migration passes, historical rows backfilled, API returns new fields.
+
+Day 2–4 (BE + ML)
+- Replace current heuristic gap formula with weighted formula from spec.
+- Acceptance: deterministic unit tests for 10+ scenarios, no regression in existing endpoints.
+
+Day 4–5 (ML + MLOps + BE)
+- Replace `gnn-surrogate-v1` insights with model-backed inference job + model versioning.
+- Acceptance: new insights generated with non-surrogate version tag and reproducible metrics.
+
+### Week 2 (P0/P1 Productization)
+
+Day 6–7 (ML + MLOps + BE)
+- Replace simulated/bandit policy loop with production optimizer + offline evaluation pipeline.
+- Acceptance: policy version artifact saved, evaluation report generated, rollout guardrails enabled.
+
+Day 7–8 (FE + BE)
+- Remove frontend stubs/fallbacks in learning-path/competency/remediation services.
+- Acceptance: no stub IDs returned in UI flows; all create/list/update actions hit live APIs.
+
+Day 8–9 (BE + QA)
+- Harden ingest reliability (OCR/audio/video capability checks, retry strategy, explicit error codes).
+- Acceptance: failure paths produce actionable errors; retry behavior verified in tests.
+
+Day 10 (QA + MLOps)
+- End-to-end validation + release candidate.
+- Acceptance: full regression pass, pipeline smoke test, rollback plan documented.
+
+### Exit Criteria (Done = 100%)
+- No `surrogate-v1` decisions in active paths.
+- Gap scoring uses weighted formula in production.
+- No frontend stub fallback for core learning-intelligence flows.
+- All pipeline stages pass automated E2E + API contract checks.

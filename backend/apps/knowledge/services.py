@@ -36,6 +36,71 @@ _MODALITY_KEYWORDS = {
 }
 
 _VALID_MODALITIES = {'reading', 'writing', 'listening', 'speaking', 'math', 'general_knowledge'}
+_TRANSIENT_ERRORS = ('timeout', 'temporar', 'connection', 'reset by peer', 'rate limit', 'service unavailable')
+
+
+def _error(message: str, code: str, retryable: bool = False, details: dict | None = None) -> dict:
+    return {
+        'error_code': code,
+        'message': message,
+        'retryable': retryable,
+        'details': details or {},
+    }
+
+
+def _extract_error(exc: Exception, code: str, default_message: str, retryable: bool = False, details: dict | None = None) -> dict:
+    message = str(exc) or default_message
+    lower = message.lower()
+    computed_retryable = retryable or any(marker in lower for marker in _TRANSIENT_ERRORS)
+    return _error(message=message, code=code, retryable=computed_retryable, details=details)
+
+
+def can_extract_document(document: KnowledgeDocument) -> dict:
+    if document.content_text:
+        return {'ok': True, 'code': 'OK_CONTENT_TEXT'}
+    if document.source_type == 'url' and not document.source_url:
+        return _error('URL source requires source_url.', 'URL_SOURCE_MISSING', retryable=False)
+    if document.source_type == 'url':
+        return {'ok': True, 'code': 'OK_URL_SOURCE'}
+    if not document.file_path:
+        return _error('File source requires file_path or content_text.', 'FILE_SOURCE_MISSING', retryable=False)
+
+    ext = document.file_path.rsplit('.', 1)[-1].lower()
+    if ext in {'png', 'jpg', 'jpeg', 'bmp', 'tiff'}:
+        try:
+            from PIL import Image  # noqa: F401
+            import pytesseract  # noqa: F401
+        except Exception as exc:
+            return _extract_error(
+                exc,
+                code='OCR_DEPENDENCY_MISSING',
+                default_message='OCR dependencies are not installed.',
+                retryable=False,
+                details={'extension': ext},
+            )
+        return {'ok': True, 'code': 'OK_OCR_CAPABLE'}
+
+    if ext in {'mp4', 'mov', 'avi', 'mkv', 'webm'}:
+        if not settings.OPENAI_API_KEY:
+            return _error('OPENAI_API_KEY is required for video transcription.', 'VIDEO_TRANSCRIPTION_UNCONFIGURED', retryable=False)
+        try:
+            from moviepy.editor import VideoFileClip  # noqa: F401
+        except Exception as exc:
+            return _extract_error(
+                exc,
+                code='VIDEO_DEPENDENCY_MISSING',
+                default_message='Video processing dependencies are not installed.',
+                retryable=False,
+                details={'extension': ext},
+            )
+        return {'ok': True, 'code': 'OK_VIDEO_CAPABLE'}
+
+    if ext in {'mp3', 'wav', 'm4a', 'aac', 'ogg'}:
+        if not settings.OPENAI_API_KEY:
+            return _error('OPENAI_API_KEY is required for audio transcription.', 'AUDIO_TRANSCRIPTION_UNCONFIGURED', retryable=False)
+        return {'ok': True, 'code': 'OK_AUDIO_CAPABLE'}
+
+    return {'ok': True, 'code': 'OK_FILE_SOURCE'}
 
 
 def estimate_tokens(text: str) -> int:
@@ -174,64 +239,119 @@ def semantic_chunk_text(text: str, max_chars: int = 1400, min_chars: int = 700) 
 
 
 def extract_text_for_document(document: KnowledgeDocument) -> str:
+    result = extract_text_for_document_with_status(document)
+    return result.get('text', '')
+
+
+def extract_text_for_document_with_status(document: KnowledgeDocument) -> dict:
+    capability = can_extract_document(document)
+    if not capability.get('ok'):
+        return {'text': '', 'error': capability}
+
     if document.content_text:
-        return document.content_text
+        return {'text': document.content_text, 'error': None}
     if document.source_type == 'url' and document.source_url:
-        return extract_text_from_url(document.source_url)
+        text, error = extract_text_from_url(document.source_url)
+        return {'text': text, 'error': error}
     if not document.file_path:
-        return ''
+        return {'text': '', 'error': _error('File source requires file_path or content_text.', 'FILE_SOURCE_MISSING', retryable=False)}
 
     ext = document.file_path.rsplit('.', 1)[-1].lower()
     if ext in {'png', 'jpg', 'jpeg', 'bmp', 'tiff'}:
-        return extract_text_from_image(document.file_path)
+        text, error = extract_text_from_image(document.file_path)
+        return {'text': text, 'error': error}
     if ext in {'pptx', 'ppt'}:
-        return extract_text_from_pptx(document.file_path)
+        text, error = extract_text_from_pptx(document.file_path)
+        return {'text': text, 'error': error}
     if ext in {'pdf'}:
-        return extract_text_from_pdf(document.file_path)
+        text, error = extract_text_from_pdf(document.file_path)
+        return {'text': text, 'error': error}
     if ext in {'mp4', 'mov', 'avi', 'mkv', 'webm'} and settings.OPENAI_API_KEY:
-        return extract_text_from_video(document.file_path)
+        text, error = extract_text_from_video(document.file_path)
+        return {'text': text, 'error': error}
     if ext in {'txt', 'md', 'csv', 'json', 'yaml', 'yml', 'html', 'htm'}:
         try:
             with default_storage.open(document.file_path, 'r') as handle:
-                return handle.read()
-        except Exception:
-            return ''
+                return {'text': handle.read(), 'error': None}
+        except Exception as exc:
+            return {
+                'text': '',
+                'error': _extract_error(
+                    exc,
+                    code='TEXT_FILE_READ_FAILED',
+                    default_message='Unable to read text document.',
+                    retryable=True,
+                ),
+            }
 
     if ext in {'mp3', 'wav', 'm4a', 'aac', 'ogg'} and settings.OPENAI_API_KEY:
         try:
             with default_storage.open(document.file_path, 'rb') as handle:
-                return AIService().transcribe_audio(handle)
-        except Exception:
-            return ''
+                return {'text': AIService().transcribe_audio(handle), 'error': None}
+        except Exception as exc:
+            return {
+                'text': '',
+                'error': _extract_error(
+                    exc,
+                    code='AUDIO_TRANSCRIPTION_FAILED',
+                    default_message='Audio transcription failed.',
+                    retryable=True,
+                    details={'extension': ext},
+                ),
+            }
 
     try:
         with default_storage.open(document.file_path, 'rb') as handle:
             data = handle.read()
-    except Exception:
-        return ''
+    except Exception as exc:
+        return {
+            'text': '',
+            'error': _extract_error(
+                exc,
+                code='FILE_READ_FAILED',
+                default_message='Failed to read source file.',
+                retryable=True,
+                details={'extension': ext},
+            ),
+        }
     text = data.decode('utf-8', errors='ignore')
-    return text.strip()
+    return {'text': text.strip(), 'error': None}
 
 
-def extract_text_from_pdf(file_path: str) -> str:
+def extract_text_from_pdf(file_path: str) -> tuple[str, dict | None]:
     try:
         from pypdf import PdfReader
-    except Exception:
-        return ''
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='PDF_DEPENDENCY_MISSING',
+            default_message='PDF extraction dependency missing.',
+            retryable=False,
+        )
     try:
         with default_storage.open(file_path, 'rb') as handle:
             reader = PdfReader(handle)
             pages = [page.extract_text() or '' for page in reader.pages]
-            return '\n'.join(pages).strip()
-    except Exception:
-        return ''
+            return '\n'.join(pages).strip(), None
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='PDF_EXTRACTION_FAILED',
+            default_message='PDF extraction failed.',
+            retryable=True,
+        )
 
 
-def extract_text_from_pptx(file_path: str) -> str:
+def extract_text_from_pptx(file_path: str) -> tuple[str, dict | None]:
     try:
         from pptx import Presentation
-    except Exception:
-        return ''
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='PPTX_DEPENDENCY_MISSING',
+            default_message='PPTX extraction dependency missing.',
+            retryable=False,
+        )
     try:
         with default_storage.open(file_path, 'rb') as handle:
             data = handle.read()
@@ -241,22 +361,38 @@ def extract_text_from_pptx(file_path: str) -> str:
             for shape in slide.shapes:
                 if hasattr(shape, 'text') and shape.text:
                     text_runs.append(shape.text)
-        return '\n'.join(text_runs).strip()
-    except Exception:
-        return ''
+        return '\n'.join(text_runs).strip(), None
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='PPTX_EXTRACTION_FAILED',
+            default_message='PPTX extraction failed.',
+            retryable=True,
+        )
 
 
-def extract_text_from_url(url: str) -> str:
+def extract_text_from_url(url: str) -> tuple[str, dict | None]:
     try:
         import requests
         from bs4 import BeautifulSoup
-    except Exception:
-        return ''
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='URL_PARSER_DEPENDENCY_MISSING',
+            default_message='URL parsing dependencies are missing.',
+            retryable=False,
+        )
     try:
         response = requests.get(url, timeout=12)
         response.raise_for_status()
-    except Exception:
-        return ''
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='URL_FETCH_FAILED',
+            default_message='Failed to fetch URL content.',
+            retryable=True,
+            details={'url': url},
+        )
     content_type = response.headers.get('content-type', '').lower()
     body = response.text
     if 'html' in content_type:
@@ -265,31 +401,46 @@ def extract_text_from_url(url: str) -> str:
             for tag in soup(['script', 'style', 'noscript']):
                 tag.decompose()
             text = soup.get_text(separator=' ')
-            return re.sub(r'\s+', ' ', text).strip()
+            return re.sub(r'\s+', ' ', text).strip(), None
         except Exception:
             pass
-    return re.sub(r'\s+', ' ', body).strip()
+    return re.sub(r'\s+', ' ', body).strip(), None
 
 
-def extract_text_from_image(file_path: str) -> str:
+def extract_text_from_image(file_path: str) -> tuple[str, dict | None]:
     try:
         from PIL import Image
         import pytesseract
-    except Exception:
-        return ''
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='OCR_DEPENDENCY_MISSING',
+            default_message='OCR dependencies are missing.',
+            retryable=False,
+        )
     try:
         with default_storage.open(file_path, 'rb') as handle:
             image = Image.open(handle)
-            return pytesseract.image_to_string(image).strip()
-    except Exception:
-        return ''
+            return pytesseract.image_to_string(image).strip(), None
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='OCR_EXTRACTION_FAILED',
+            default_message='OCR extraction failed.',
+            retryable=True,
+        )
 
 
-def extract_text_from_video(file_path: str) -> str:
+def extract_text_from_video(file_path: str) -> tuple[str, dict | None]:
     try:
         from moviepy.editor import VideoFileClip
-    except Exception:
-        return ''
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='VIDEO_DEPENDENCY_MISSING',
+            default_message='Video dependencies are missing.',
+            retryable=False,
+        )
     video_temp = None
     audio_temp = None
     try:
@@ -303,13 +454,18 @@ def extract_text_from_video(file_path: str) -> str:
         audio_temp.close()
         clip = VideoFileClip(video_temp.name)
         if clip.audio is None:
-            return ''
+            return '', _error('Video file has no audio track.', 'VIDEO_AUDIO_TRACK_MISSING', retryable=False)
         clip.audio.write_audiofile(audio_temp.name, logger=None)
         clip.close()
         with open(audio_temp.name, 'rb') as audio_file:
-            return AIService().transcribe_audio(audio_file).strip()
-    except Exception:
-        return ''
+            return AIService().transcribe_audio(audio_file).strip(), None
+    except Exception as exc:
+        return '', _extract_error(
+            exc,
+            code='VIDEO_TRANSCRIPTION_FAILED',
+            default_message='Video transcription failed.',
+            retryable=True,
+        )
     finally:
         for temp_file in (video_temp, audio_temp):
             if not temp_file:

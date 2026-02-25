@@ -1226,7 +1226,7 @@ export const useLMSStore = create<LMSState>()(
         const { currentOrg } = get();
         if (!currentOrg) return;
         try {
-          await remediationService.update(assignmentId, updates);
+          await remediationService.update(assignmentId, { ...updates, orgId: currentOrg.id });
           set((state) => ({
             remediationAssignments: state.remediationAssignments.map((assignment) =>
               assignment.id === assignmentId

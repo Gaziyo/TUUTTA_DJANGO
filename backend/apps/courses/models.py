@@ -199,3 +199,59 @@ class AdaptiveReleaseRule(models.Model):
 
     def __str__(self):
         return f'AdaptiveReleaseRule({self.course_id}, {self.module_id}, {self.rule_type})'
+
+
+class LearningPath(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('published', 'Published'),
+        ('archived', 'Archived'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='learning_paths')
+    title = models.CharField(max_length=500)
+    description = models.TextField(blank=True)
+    thumbnail_url = models.URLField(blank=True)
+    estimated_duration = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_learning_paths')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'learning_paths'
+        indexes = [
+            models.Index(fields=['organization', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class LearningPathCourse(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    learning_path = models.ForeignKey(LearningPath, on_delete=models.CASCADE, related_name='path_courses')
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='learning_path_entries')
+    order_index = models.IntegerField(default=0)
+    is_required = models.BooleanField(default=True)
+    unlock_after = models.ForeignKey(
+        Course,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='learning_path_unlocks',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'learning_path_courses'
+        ordering = ['order_index', 'created_at']
+        unique_together = ['learning_path', 'course']
+
+    def __str__(self):
+        return f'{self.learning_path_id}:{self.course_id}'

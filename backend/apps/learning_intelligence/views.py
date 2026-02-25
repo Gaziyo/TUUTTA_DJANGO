@@ -1,10 +1,12 @@
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from apps.organizations.models import OrganizationMember
 from .models import (
     CognitiveProfile,
     GapMatrix,
     RemediationTrigger,
+    RemediationAssignment,
     AdaptivePolicy,
     AdaptiveRecommendation,
     AdaptiveDecisionLog,
@@ -18,6 +20,7 @@ from .serializers import (
     CognitiveProfileSerializer,
     GapMatrixSerializer,
     RemediationTriggerSerializer,
+    RemediationAssignmentSerializer,
     AdaptivePolicySerializer,
     AdaptiveRecommendationSerializer,
     AdaptiveDecisionLogSerializer,
@@ -86,6 +89,33 @@ class RemediationTriggerViewSet(viewsets.ModelViewSet):
         serializer.save(organization_id=org_id)
 
 
+class RemediationAssignmentViewSet(viewsets.ModelViewSet):
+    serializer_class = RemediationAssignmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['status', 'user', 'course', 'trigger']
+
+    def get_queryset(self):
+        user = self.request.user
+        org_id = self.kwargs.get('organization_pk') or self.request.query_params.get('organization')
+        qs = RemediationAssignment.objects.select_related('course', 'trigger', 'enrollment', 'user')
+        if org_id:
+            qs = qs.filter(organization_id=org_id)
+        has_admin_role = False
+        if org_id:
+            has_admin_role = OrganizationMember.objects.filter(
+                organization_id=org_id,
+                user=user,
+                role__in=['org_admin', 'ld_manager', 'manager', 'super_admin'],
+            ).exists()
+        if not user.is_staff and not has_admin_role:
+            qs = qs.filter(user=user)
+        return qs.order_by('-created_at')
+
+    def perform_create(self, serializer):
+        org_id = self.kwargs.get('organization_pk') or self.request.data.get('organization')
+        serializer.save(organization_id=org_id, created_by=self.request.user)
+
+
 class AdaptivePolicyViewSet(viewsets.ModelViewSet):
     serializer_class = AdaptivePolicySerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -109,6 +139,25 @@ class AdaptivePolicyViewSet(viewsets.ModelViewSet):
 
         optimize_adaptive_policy_task.delay(str(org_id))
         return Response({'status': 'queued'})
+
+    @action(detail=False, methods=['post'], url_path='optimize-now')
+    def optimize_now(self, request, **kwargs):
+        org_id = self.kwargs.get('organization_pk') or request.data.get('organization')
+        if not org_id:
+            return Response({'error': 'organization is required'}, status=400)
+        from .tasks import optimize_adaptive_policy_task
+
+        optimize_adaptive_policy_task(str(org_id))
+        policy = AdaptivePolicy.objects.filter(organization_id=org_id).order_by('-updated_at').first()
+        if not policy:
+            return Response({'status': 'missing'})
+        return Response({
+            'status': 'completed',
+            'policy_id': str(policy.id),
+            'current_version': policy.current_version,
+            'guardrails': (policy.config or {}).get('rollout_guardrails', {}),
+            'evaluation_report': (policy.config or {}).get('offline_evaluation_report', {}),
+        })
 
     @action(detail=False, methods=['post'], url_path='simulate')
     def simulate(self, request, **kwargs):

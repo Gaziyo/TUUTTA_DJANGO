@@ -3,6 +3,7 @@ from .models import (
     CognitiveProfile,
     GapMatrix,
     RemediationTrigger,
+    RemediationAssignment,
     AdaptivePolicy,
     AdaptiveRecommendation,
     AdaptiveDecisionLog,
@@ -36,6 +37,10 @@ class GapMatrixSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'organization', 'competency', 'competency_name',
             'current_bloom_level', 'target_bloom_level', 'gap_score',
+            'bloom_gap_component', 'modality_gap_component', 'threshold_gap_component',
+            'role_requirement_component', 'weighted_bloom_gap', 'weighted_modality_gap',
+            'bloom_weight', 'modality_weight', 'threshold_score_target', 'learner_score',
+            'gap_details',
             'priority', 'recommended_course', 'recommended_course_title',
             'status', 'created_at', 'updated_at',
         ]
@@ -53,6 +58,20 @@ class RemediationTriggerSerializer(serializers.ModelSerializer):
             'id', 'organization', 'competency', 'competency_name',
             'assessment', 'assessment_title', 'remediation_course', 'remediation_course_title',
             'min_gap_score', 'max_attempts', 'is_active', 'metadata',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class RemediationAssignmentSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source='course.title', read_only=True)
+
+    class Meta:
+        model = RemediationAssignment
+        fields = [
+            'id', 'organization', 'user', 'created_by', 'trigger', 'enrollment',
+            'course', 'course_title', 'module_id', 'lesson_id',
+            'status', 'reason', 'scheduled_reassessment_at', 'metadata',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

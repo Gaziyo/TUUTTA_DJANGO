@@ -16,10 +16,12 @@ from apps.enrollments.models import Enrollment
 from apps.notifications.services import enqueue_notification
 from apps.analytics.models import AuditLog
 from apps.organizations.models import Organization, OrganizationMember
+from apps.governance.models import ModelVersion
 
 from .models import (
     CognitiveProfile,
     GapMatrix,
+    RemediationAssignment,
     AdaptivePolicy,
     AdaptiveRecommendation,
     AdaptiveDecisionLog,
@@ -40,6 +42,141 @@ _LEVEL_MAP = {
 }
 
 _RL_ACTIONS = ['recommend_course', 'nudge_course', 'assign_remediation', 'unlock_module', 'explore_paths']
+_MIN_OFFLINE_SAMPLES = 10
+_MIN_ACCEPTED_MEAN_REWARD = 0.45
+_MAX_ACCEPTED_REWARD_STDDEV = 0.35
+
+
+def _stddev(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    mean_value = sum(values) / len(values)
+    variance = sum((value - mean_value) ** 2 for value in values) / len(values)
+    return variance ** 0.5
+
+
+def _build_policy_evaluation_report(org: Organization, policy: AdaptivePolicy, q_values: dict, counts: dict) -> dict:
+    decisions_qs = AdaptiveDecisionLog.objects.filter(organization=org)
+    rewards = list(decisions_qs.exclude(reward__isnull=True).values_list('reward', flat=True))
+    total_decisions = decisions_qs.count()
+    reward_count = len(rewards)
+    reward_mean = round(sum(rewards) / reward_count, 4) if reward_count else 0.0
+    reward_stddev = round(_stddev(rewards), 4) if rewards else 0.0
+
+    per_action = []
+    for action in _RL_ACTIONS:
+        action_rewards = list(
+            decisions_qs.filter(action_type=action)
+            .exclude(reward__isnull=True)
+            .values_list('reward', flat=True)
+        )
+        action_mean = round(sum(action_rewards) / len(action_rewards), 4) if action_rewards else 0.0
+        per_action.append({
+            'action': action,
+            'count': int(counts.get(action, 0)),
+            'q_value': float(q_values.get(action, 0.0)),
+            'reward_samples': len(action_rewards),
+            'reward_mean': action_mean,
+        })
+
+    passes_guardrails = (
+        total_decisions >= _MIN_OFFLINE_SAMPLES
+        and reward_count >= _MIN_OFFLINE_SAMPLES
+        and reward_mean >= _MIN_ACCEPTED_MEAN_REWARD
+        and reward_stddev <= _MAX_ACCEPTED_REWARD_STDDEV
+    )
+    failed_rules = []
+    if total_decisions < _MIN_OFFLINE_SAMPLES:
+        failed_rules.append('min_total_decisions')
+    if reward_count < _MIN_OFFLINE_SAMPLES:
+        failed_rules.append('min_reward_samples')
+    if reward_mean < _MIN_ACCEPTED_MEAN_REWARD:
+        failed_rules.append('min_mean_reward')
+    if reward_stddev > _MAX_ACCEPTED_REWARD_STDDEV:
+        failed_rules.append('max_reward_stddev')
+
+    return {
+        'policy_id': str(policy.id),
+        'policy_name': policy.name,
+        'evaluated_at': timezone.now().isoformat(),
+        'dataset': {
+            'total_decisions': total_decisions,
+            'reward_samples': reward_count,
+        },
+        'metrics': {
+            'reward_mean': reward_mean,
+            'reward_stddev': reward_stddev,
+        },
+        'per_action': per_action,
+        'guardrails': {
+            'min_total_decisions': _MIN_OFFLINE_SAMPLES,
+            'min_reward_samples': _MIN_OFFLINE_SAMPLES,
+            'min_mean_reward': _MIN_ACCEPTED_MEAN_REWARD,
+            'max_reward_stddev': _MAX_ACCEPTED_REWARD_STDDEV,
+            'passes': passes_guardrails,
+            'failed_rules': failed_rules,
+        },
+    }
+
+_BLOOM_WEIGHTS = {
+    1: 1.0,
+    2: 1.2,
+    3: 1.5,
+    4: 2.0,
+    5: 2.5,
+    6: 3.0,
+}
+
+_ROLE_MODALITY_WEIGHTS = {
+    'learner': {
+        'reading': 1.1,
+        'writing': 1.0,
+        'listening': 1.0,
+        'speaking': 1.0,
+        'math': 1.0,
+        'general_knowledge': 1.0,
+    },
+    'instructor': {
+        'reading': 1.1,
+        'writing': 1.2,
+        'listening': 1.0,
+        'speaking': 1.3,
+        'math': 1.0,
+        'general_knowledge': 1.0,
+    },
+    'team_lead': {
+        'reading': 1.0,
+        'writing': 1.1,
+        'listening': 1.2,
+        'speaking': 1.4,
+        'math': 1.0,
+        'general_knowledge': 1.0,
+    },
+    'ld_manager': {
+        'reading': 1.1,
+        'writing': 1.2,
+        'listening': 1.1,
+        'speaking': 1.3,
+        'math': 1.0,
+        'general_knowledge': 1.0,
+    },
+    'org_admin': {
+        'reading': 1.1,
+        'writing': 1.1,
+        'listening': 1.0,
+        'speaking': 1.2,
+        'math': 1.0,
+        'general_knowledge': 1.0,
+    },
+    'super_admin': {
+        'reading': 1.1,
+        'writing': 1.2,
+        'listening': 1.1,
+        'speaking': 1.3,
+        'math': 1.0,
+        'general_knowledge': 1.0,
+    },
+}
 
 
 def _derive_current_bloom_level(profile: CognitiveProfile) -> int:
@@ -82,6 +219,89 @@ def _priority_from_gap(gap_score: float) -> int:
     if gap_score >= 0.15:
         return 4
     return 5
+
+
+def _safe_ratio(value: float, denominator: float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return max(0.0, min(1.0, value / denominator))
+
+
+def _get_primary_role_modality(member: OrganizationMember, competency) -> str:
+    required_modalities = competency.required_modalities or []
+    if required_modalities:
+        return required_modalities[0]
+    role_defaults = {
+        'learner': 'reading',
+        'instructor': 'speaking',
+        'team_lead': 'speaking',
+        'ld_manager': 'writing',
+        'org_admin': 'reading',
+        'super_admin': 'writing',
+    }
+    return role_defaults.get(member.role, 'reading')
+
+
+def _compute_weighted_gap_components(member: OrganizationMember, competency, profile: CognitiveProfile, target_level: int) -> dict:
+    bloom_mastery = profile.bloom_mastery or {}
+    modality_strengths = profile.modality_strengths or {}
+
+    bloom_score = 0.0
+    bloom_aliases = {
+        1: ['1', 'remember'],
+        2: ['2', 'understand'],
+        3: ['3', 'apply'],
+        4: ['4', 'analyze', 'analyse'],
+        5: ['5', 'evaluate'],
+        6: ['6', 'create'],
+    }
+    for key in bloom_aliases.get(target_level, [str(target_level)]):
+        bloom_score = max(bloom_score, float(bloom_mastery.get(key, 0) or 0))
+
+    threshold_target = float(competency.threshold_score or 0.75)
+    primary_modality = _get_primary_role_modality(member, competency)
+    modality_score = float(modality_strengths.get(primary_modality, 0) or 0)
+    learner_score = round((0.6 * bloom_score) + (0.4 * modality_score), 4)
+
+    bloom_gap = max(0.0, 1.0 - bloom_score)
+    modality_gap = max(0.0, 1.0 - modality_score)
+    threshold_gap = max(0.0, threshold_target - learner_score)
+    role_requirement_gap = max(0.0, _safe_ratio(target_level - _derive_current_bloom_level(profile), float(max(target_level, 1))))
+
+    bloom_weight = float(_BLOOM_WEIGHTS.get(target_level, 1.0))
+    modality_weight = float(_ROLE_MODALITY_WEIGHTS.get(member.role, {}).get(primary_modality, 1.0))
+
+    weighted_bloom_gap = bloom_gap * bloom_weight
+    weighted_modality_gap = modality_gap * modality_weight
+
+    # Final weighted formula (normalized to 0..1)
+    weighted_sum = (
+        (weighted_bloom_gap * 0.45)
+        + (weighted_modality_gap * 0.25)
+        + (threshold_gap * 0.20)
+        + (role_requirement_gap * 0.10)
+    )
+    gap_score = min(1.0, max(0.0, weighted_sum / 1.5))
+
+    return {
+        'bloom_gap_component': round(bloom_gap, 4),
+        'modality_gap_component': round(modality_gap, 4),
+        'threshold_gap_component': round(threshold_gap, 4),
+        'role_requirement_component': round(role_requirement_gap, 4),
+        'weighted_bloom_gap': round(weighted_bloom_gap, 4),
+        'weighted_modality_gap': round(weighted_modality_gap, 4),
+        'bloom_weight': round(bloom_weight, 4),
+        'modality_weight': round(modality_weight, 4),
+        'threshold_score_target': round(threshold_target, 4),
+        'learner_score': round(learner_score, 4),
+        'gap_score': round(gap_score, 4),
+        'gap_details': {
+            'formula': '0.45*bloom + 0.25*modality + 0.20*threshold + 0.10*role_requirement',
+            'primary_modality': primary_modality,
+            'target_level': target_level,
+            'source': 'weighted-gap-v1',
+        },
+    }
 
 
 def _initialize_bandit_config(policy: AdaptivePolicy) -> dict:
@@ -162,9 +382,8 @@ def compute_gap_matrix_task(org_id: str) -> int:
         for mapping in role_mappings:
             competency = mapping.competency
             target_level = competency.bloom_level_target or _LEVEL_MAP.get(mapping.required_level, 0)
-            gap_score = 0.0
-            if target_level > 0:
-                gap_score = max(0.0, (target_level - current_level) / float(target_level))
+            components = _compute_weighted_gap_components(member, competency, profile, target_level)
+            gap_score = components['gap_score']
             status = 'closed' if gap_score <= 0.05 else ('in_progress' if current_level > 0 else 'open')
             recommended_course = Course.objects.filter(
                 competency_tag=competency,
@@ -179,6 +398,17 @@ def compute_gap_matrix_task(org_id: str) -> int:
                     'current_bloom_level': current_level,
                     'target_bloom_level': target_level,
                     'gap_score': gap_score,
+                    'bloom_gap_component': components['bloom_gap_component'],
+                    'modality_gap_component': components['modality_gap_component'],
+                    'threshold_gap_component': components['threshold_gap_component'],
+                    'role_requirement_component': components['role_requirement_component'],
+                    'weighted_bloom_gap': components['weighted_bloom_gap'],
+                    'weighted_modality_gap': components['weighted_modality_gap'],
+                    'bloom_weight': components['bloom_weight'],
+                    'modality_weight': components['modality_weight'],
+                    'threshold_score_target': components['threshold_score_target'],
+                    'learner_score': components['learner_score'],
+                    'gap_details': components['gap_details'],
                     'priority': _priority_from_gap(gap_score),
                     'recommended_course': recommended_course,
                     'status': status,
@@ -290,6 +520,18 @@ def remediation_trigger_task(org_id: str) -> int:
             )
             if was_created:
                 created += 1
+                RemediationAssignment.objects.get_or_create(
+                    organization=org,
+                    user=user,
+                    course=trigger.remediation_course,
+                    enrollment=enrollment,
+                    trigger=trigger,
+                    defaults={
+                        'status': 'assigned',
+                        'reason': 'Triggered by remediation policy',
+                        'metadata': {'source': 'remediation_trigger_task'},
+                    },
+                )
                 enqueue_notification(
                     user_id=str(user.id),
                     org_id=str(org.id),
@@ -552,6 +794,23 @@ def optimize_adaptive_policy_task(org_id: str | None = None) -> int:
             q_values[action] = round(((q_values.get(action, 0.3) * previous_count) + (avg_reward * action_count)) / total_count, 3)
             counts[action] = total_count
 
+        optimized_at = timezone.now()
+        report = _build_policy_evaluation_report(org, policy, q_values, counts)
+        next_version = f'bandit-v{max(2, (total // 50) + 2)}'
+        passes_guardrails = bool(report.get('guardrails', {}).get('passes'))
+        rollout_state = 'active' if passes_guardrails else 'staged'
+
+        model_version, _ = ModelVersion.objects.update_or_create(
+            organization=org,
+            model_name='adaptive-policy-bandit',
+            version=next_version,
+            defaults={
+                'status': rollout_state,
+                'metrics': report,
+                'deployed_at': optimized_at if passes_guardrails else None,
+            },
+        )
+
         policy.config = {
             **(policy.config or {}),
             'decision_count': total,
@@ -560,13 +819,26 @@ def optimize_adaptive_policy_task(org_id: str | None = None) -> int:
                 'epsilon': max(0.05, bandit['epsilon'] * 0.98),
                 'q_values': q_values,
                 'counts': counts,
-                'optimized_at': timezone.now().isoformat(),
+                'optimized_at': optimized_at.isoformat(),
             },
-            'optimized_at': timezone.now().isoformat(),
-            'note': 'Bandit optimization pass',
+            'optimized_at': optimized_at.isoformat(),
+            'note': 'Bandit optimization pass with offline evaluation',
+            'offline_evaluation_report': report,
+            'rollout_guardrails': report.get('guardrails', {}),
+            'candidate_model_version': next_version,
+            'candidate_model_status': rollout_state,
+            'candidate_model_id': str(model_version.id),
         }
-        policy.status = 'active'
-        policy.save(update_fields=['config', 'status', 'updated_at'])
+        if passes_guardrails:
+            policy.current_version = next_version
+            policy.status = 'active'
+        policy.save(update_fields=['config', 'status', 'current_version', 'updated_at'])
+
+        _log_ai_decision(org, 'system', 'policy_optimized', 'policy', str(policy.id), {
+            'policy_version': next_version,
+            'guardrails': report.get('guardrails', {}),
+            'metrics': report.get('metrics', {}),
+        })
         updated += 1
     return updated
 
@@ -640,21 +912,23 @@ def compute_gnn_insights_task(org_id: str) -> int:
     except Exception:
         metrics.update({'note': 'networkx unavailable, fallback metrics only'})
 
+    model_version = 'gnn-centrality-v1'
+
     insights = [
         {
             'name': 'MasteryProbability',
             'insight_type': 'mastery_probability',
-            'metrics': {**metrics, 'model': 'gnn-surrogate-v1'},
+            'metrics': {**metrics, 'model': model_version},
         },
         {
             'name': 'HiddenPrerequisiteWeakness',
             'insight_type': 'prerequisite_weakness',
-            'metrics': {'weakness_clusters': influences[:3], 'model': 'gnn-surrogate-v1'},
+            'metrics': {'weakness_clusters': influences[:3], 'model': model_version},
         },
         {
             'name': 'CrossCompetencyInfluence',
             'insight_type': 'cross_competency',
-            'metrics': {'influences': influences, 'model': 'gnn-surrogate-v1'},
+            'metrics': {'influences': influences, 'model': model_version},
         },
     ]
 
@@ -669,7 +943,7 @@ def compute_gnn_insights_task(org_id: str) -> int:
     ModelVersion.objects.update_or_create(
         organization_id=org_id,
         model_name='gnn-insight',
-        version='surrogate-v1',
+        version=model_version,
         defaults={'status': 'active', 'metrics': metrics},
     )
     return len(insights)
