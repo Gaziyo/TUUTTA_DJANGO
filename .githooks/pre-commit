@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Block committing .env files or obvious secrets.
+staged_files=$(git diff --cached --name-only)
+
+if echo "$staged_files" | rg -q '(^|/)\.env($|\.|_)'; then
+  echo "Commit blocked: .env files should not be committed."
+  exit 1
+fi
+
+# Basic secret patterns (extend as needed).
+if git diff --cached -U0 | rg -q 'sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z\-_]{20,}|-----BEGIN (EC|RSA|OPENSSH|PRIVATE) KEY-----'; then
+  echo "Commit blocked: possible secret detected in staged changes."
+  exit 1
+fi
+
+exit 0

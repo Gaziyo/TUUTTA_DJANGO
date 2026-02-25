@@ -154,7 +154,9 @@ const GenieAutoBuildLauncher: React.FC<GenieAutoBuildLauncherProps> = ({
         options,
         correctAnswer,
         points: 10,
-        explanation: question.explanation || ''
+        explanation: question.explanation || '',
+        bloomLevel: question.bloomLevel ?? question.bloom_level ?? undefined,
+        bloomLabel: question.bloomLabel ?? question.bloom_label ?? undefined
       };
     });
   };

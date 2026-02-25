@@ -1,31 +1,16 @@
 /**
  * Progress Service — Canonical Implementation
  *
- * Collections:
- *   /progress/{userId}_{courseId} — Summary document
- *   /progress/{userId}_{courseId}/events/{eventId} — Event subcollection
+ * Delegates to Django REST API:
+ *   GET/PATCH /progress/      — ProgressRecord list (scoped to current user)
+ *   GET/PATCH /progress/{id}/ — individual record (with nested lesson/module progress)
  *
  * All progress tracking goes through this service.
  * Components NEVER call Firestore directly.
  */
 
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  collection,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
-import type {
-  ProgressSummary,
-  ProgressEvent,
-} from '../../types/schema';
+import { apiClient } from '../../lib/api';
+import type { ProgressSummary, ProgressEvent } from '../../types/schema';
 import { activity } from './activityService';
 import { enrollmentService } from './enrollmentService';
 import { observabilityService } from '../observabilityService';
@@ -37,27 +22,67 @@ export class ProgressNotFoundError extends Error {
   }
 }
 
-/**
- * Generate progress summary ID.
- * Format: {userId}_{courseId}
- */
+// ─── Mapper ───────────────────────────────────────────────────────────────────
+
+function mapProgressRecord(r: Record<string, unknown>): ProgressSummary {
+  const lessonProgressList = (r.lesson_progress as Record<string, unknown>[]) ?? [];
+  const moduleProgressList = (r.module_progress as Record<string, unknown>[]) ?? [];
+
+  const completedLessonIds = lessonProgressList
+    .filter(lp => lp.status === 'completed')
+    .map(lp => lp.lesson as string);
+
+  const completedModuleIds = moduleProgressList
+    .filter(mp => mp.status === 'completed')
+    .map(mp => mp.module as string);
+
+  // Derive lastLessonId from most recently accessed lesson
+  const sortedLessons = [...lessonProgressList].sort((a, b) => {
+    const aTime = a.last_accessed_at ? new Date(a.last_accessed_at as string).getTime() : 0;
+    const bTime = b.last_accessed_at ? new Date(b.last_accessed_at as string).getTime() : 0;
+    return bTime - aTime;
+  });
+  const lastLessonId = sortedLessons.length ? (sortedLessons[0].lesson as string) : undefined;
+
+  return {
+    id: r.id as string,
+    orgId: '',
+    userId: r.user as string,
+    courseId: r.course as string,
+    enrollmentId: (r.enrollment as string) || '',
+    completedLessonIds,
+    completedModuleIds,
+    percentComplete: parseFloat(r.completion_percentage as string) || 0,
+    totalTimeSpentSeconds: (r.total_time_spent as number) || 0,
+    lastLessonId,
+    updatedAt: r.updated_at ? new Date(r.updated_at as string).getTime() : Date.now(),
+  };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 export function generateProgressId(userId: string, courseId: string): string {
   return `${userId}_${courseId}`;
 }
+
+async function fetchProgressList(): Promise<Record<string, unknown>[]> {
+  const { data } = await apiClient.get('/progress/');
+  return Array.isArray(data) ? data : (data.results ?? []);
+}
+
+// ─── Read operations ──────────────────────────────────────────────────────────
 
 /**
  * Get progress summary for a user's course enrollment.
  */
 export async function getProgress(userId: string, courseId: string): Promise<ProgressSummary | null> {
-  const progressId = generateProgressId(userId, courseId);
-  const progressRef = doc(db, 'progress', progressId);
-  const snapshot = await getDoc(progressRef);
-
-  if (!snapshot.exists()) {
+  try {
+    const records = await fetchProgressList();
+    const record = records.find(r => (r.course as string) === courseId);
+    return record ? mapProgressRecord(record) : null;
+  } catch {
     return null;
   }
-
-  return snapshot.data() as ProgressSummary;
 }
 
 /**
@@ -65,33 +90,50 @@ export async function getProgress(userId: string, courseId: string): Promise<Pro
  */
 export async function getProgressOrThrow(userId: string, courseId: string): Promise<ProgressSummary> {
   const progress = await getProgress(userId, courseId);
-  if (!progress) {
-    throw new ProgressNotFoundError(generateProgressId(userId, courseId));
-  }
+  if (!progress) throw new ProgressNotFoundError(generateProgressId(userId, courseId));
   return progress;
 }
 
 /**
  * Get all progress records for a user.
  */
-export async function getProgressForUser(userId: string): Promise<ProgressSummary[]> {
-  const progressRef = collection(db, 'progress');
-  const q = query(progressRef, where('userId', '==', userId));
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as ProgressSummary);
+export async function getProgressForUser(_userId: string): Promise<ProgressSummary[]> {
+  try {
+    const records = await fetchProgressList();
+    return records.map(mapProgressRecord);
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Get all progress records for a course.
+ * Scoped to the current user — cross-user data requires admin endpoints.
  */
 export async function getProgressForCourse(courseId: string): Promise<ProgressSummary[]> {
-  const progressRef = collection(db, 'progress');
-  const q = query(progressRef, where('courseId', '==', courseId));
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as ProgressSummary);
+  try {
+    const records = await fetchProgressList();
+    return records
+      .filter(r => (r.course as string) === courseId)
+      .map(mapProgressRecord);
+  } catch {
+    return [];
+  }
 }
+
+/**
+ * Get progress events. Stubbed — Django ProgressEvent records are
+ * not yet exposed via a list endpoint.
+ */
+export async function getProgressEvents(
+  _userId: string,
+  _courseId: string,
+  _limitCount = 50
+): Promise<ProgressEvent[]> {
+  return [];
+}
+
+// ─── Write operations ─────────────────────────────────────────────────────────
 
 /**
  * Record a lesson start event.
@@ -101,42 +143,27 @@ export async function recordLessonStart(
   courseId: string,
   lessonId: string
 ): Promise<void> {
-  const progress = await getProgressOrThrow(userId, courseId);
-  const progressId = progress.id;
+  try {
+    const records = await fetchProgressList();
+    const record = records.find(r => (r.course as string) === courseId);
+    if (!record) return;
 
-  // Write event to subcollection
-  const eventRef = doc(collection(db, 'progress', progressId, 'events'));
-  const event: ProgressEvent = {
-    id: eventRef.id,
-    type: 'lesson_start',
-    lessonId,
-    moduleId: null,
-    durationSeconds: 0,
-    timestamp: serverTimestamp() as any,
-  };
+    await apiClient.patch(`/progress/${record.id}/`, {
+      last_accessed_at: new Date().toISOString(),
+    });
 
-  await setDoc(eventRef, event);
-
-  // Update summary with last lesson
-  const progressRef = doc(db, 'progress', progressId);
-  await updateDoc(progressRef, {
-    lastLessonId: lessonId,
-    updatedAt: serverTimestamp(),
-  });
-
-  // Log activity
-  await activity.lessonView(progress.orgId, userId, lessonId);
+    const progress = mapProgressRecord(record);
+    await activity.lessonView(progress.orgId || '', userId, lessonId);
+  } catch {
+    // Fire-and-forget: progress tracking should not block the learner.
+  }
 }
 
 /**
  * Record a lesson completion event.
  *
- * This is the core progress tracking function. It:
- * 1. Writes a lesson_complete event
- * 2. Updates completedLessonIds
- * 3. Recomputes percentComplete
- * 4. Checks for module completion
- * 5. Checks for course completion
+ * Updates completion_percentage and total_time_spent on the Django ProgressRecord.
+ * Checks for module and course completion based on provided lesson/module ID lists.
  */
 export async function recordLessonComplete(
   userId: string,
@@ -145,185 +172,117 @@ export async function recordLessonComplete(
   moduleId: string,
   durationSeconds: number,
   totalLessons: number,
-  _totalModules: number, // Kept for API consistency
-  moduleLessonIds: string[], // All lesson IDs in this module
-  allModuleIds: string[] // All module IDs in the course
+  _totalModules: number,
+  moduleLessonIds: string[],
+  allModuleIds: string[]
 ): Promise<{
   percentComplete: number;
   moduleCompleted: boolean;
   courseCompleted: boolean;
 }> {
   const progress = await getProgressOrThrow(userId, courseId);
-  const progressId = progress.id;
 
-  // Check if already completed
+  // Guard: already completed
   if (progress.completedLessonIds.includes(lessonId)) {
-    return {
-      percentComplete: progress.percentComplete,
-      moduleCompleted: false,
-      courseCompleted: false,
-    };
+    return { percentComplete: progress.percentComplete, moduleCompleted: false, courseCompleted: false };
   }
 
-  // Write lesson_complete event
-  const eventRef = doc(collection(db, 'progress', progressId, 'events'));
-  const event: ProgressEvent = {
-    id: eventRef.id,
-    type: 'lesson_complete',
-    lessonId,
-    moduleId,
-    durationSeconds,
-    timestamp: serverTimestamp() as any,
-  };
-  await setDoc(eventRef, event);
-
-  // Update completed lessons
   const newCompletedLessonIds = [...progress.completedLessonIds, lessonId];
-
-  // Check for module completion
-  let moduleCompleted = false;
   const newCompletedModuleIds = [...progress.completedModuleIds];
 
-  const moduleLessonsComplete = moduleLessonIds.every(id =>
-    newCompletedLessonIds.includes(id)
-  );
-
+  // Check module completion
+  let moduleCompleted = false;
+  const moduleLessonsComplete = moduleLessonIds.every(id => newCompletedLessonIds.includes(id));
   if (moduleLessonsComplete && !progress.completedModuleIds.includes(moduleId)) {
     moduleCompleted = true;
     newCompletedModuleIds.push(moduleId);
-
-    // Write module_complete event
-    const moduleEventRef = doc(collection(db, 'progress', progressId, 'events'));
-    const moduleEvent: ProgressEvent = {
-      id: moduleEventRef.id,
-      type: 'module_complete',
-      lessonId: null,
-      moduleId,
-      durationSeconds: 0,
-      timestamp: serverTimestamp() as any,
-    };
-    await setDoc(moduleEventRef, moduleEvent);
   }
 
-  // Calculate new percentage
+  // Compute new percentage
   const percentComplete = Math.round((newCompletedLessonIds.length / totalLessons) * 100);
 
-  // Check for course completion
+  // Check course completion
   let courseCompleted = false;
-  const allModulesComplete = allModuleIds.every(id =>
-    newCompletedModuleIds.includes(id)
-  );
-
+  const allModulesComplete = allModuleIds.every(id => newCompletedModuleIds.includes(id));
   if (allModulesComplete && percentComplete === 100) {
     courseCompleted = true;
-
-    // Write course_complete event
-    const courseEventRef = doc(collection(db, 'progress', progressId, 'events'));
-    const courseEvent: ProgressEvent = {
-      id: courseEventRef.id,
-      type: 'course_complete',
-      lessonId: null,
-      moduleId: null,
-      durationSeconds: 0,
-      timestamp: serverTimestamp() as any,
-    };
-    await setDoc(courseEventRef, courseEvent);
-
-    // Update enrollment status
-    await enrollmentService.completeEnrollment(progress.enrollmentId);
   }
 
-  // Update summary doc
-  const progressRef = doc(db, 'progress', progressId);
-  await updateDoc(progressRef, {
-    completedLessonIds: newCompletedLessonIds,
-    completedModuleIds: newCompletedModuleIds,
-    lastLessonId: lessonId,
-    percentComplete,
-    totalTimeSpentSeconds: progress.totalTimeSpentSeconds + durationSeconds,
-    updatedAt: serverTimestamp(),
-  });
+  // Persist updated stats to Django
+  try {
+    const payload: Record<string, unknown> = {
+      completion_percentage: percentComplete,
+      total_time_spent: progress.totalTimeSpentSeconds + durationSeconds,
+      last_accessed_at: new Date().toISOString(),
+    };
+    if (courseCompleted) payload.completed_at = new Date().toISOString();
+    await apiClient.patch(`/progress/${progress.id}/`, payload);
+  } catch {
+    // Non-blocking
+  }
+
+  // Complete enrollment if course is done
+  if (courseCompleted) {
+    await enrollmentService.completeEnrollment(progress.enrollmentId).catch(() => {});
+    await activity.courseComplete(progress.orgId || '', userId, courseId);
+  }
 
   // Log activity
-  await activity.lessonComplete(progress.orgId, userId, lessonId, durationSeconds);
+  await activity.lessonComplete(progress.orgId || '', userId, lessonId, durationSeconds);
 
-  // Observability: Critical path events
   observabilityService.logUserAction({
-    orgId: progress.orgId,
+    orgId: progress.orgId || '',
     actorId: userId,
     action: 'lesson_completed',
     status: 'success',
     entityType: 'lesson',
     entityId: lessonId,
     metadata: { courseId, moduleId, percentComplete },
-  }).catch(() => {}); // Non-blocking
+  }).catch(() => {});
 
   if (moduleCompleted) {
     observabilityService.logUserAction({
-      orgId: progress.orgId,
+      orgId: progress.orgId || '',
       actorId: userId,
       action: 'module_completed',
       status: 'success',
       entityType: 'module',
       entityId: moduleId,
       metadata: { courseId },
-    }).catch(() => {}); // Non-blocking
+    }).catch(() => {});
   }
 
   if (courseCompleted) {
-    await activity.courseComplete(progress.orgId, userId, courseId);
-
     observabilityService.logUserAction({
-      orgId: progress.orgId,
+      orgId: progress.orgId || '',
       actorId: userId,
       action: 'course_completed',
       status: 'success',
       entityType: 'course',
       entityId: courseId,
       metadata: { enrollmentId: progress.enrollmentId },
-    }).catch(() => {}); // Non-blocking
+    }).catch(() => {});
   }
 
-  return {
-    percentComplete,
-    moduleCompleted,
-    courseCompleted,
-  };
+  return { percentComplete, moduleCompleted, courseCompleted };
 }
 
 /**
- * Get progress events for a user's course.
- */
-export async function getProgressEvents(
-  userId: string,
-  courseId: string,
-  limitCount = 50
-): Promise<ProgressEvent[]> {
-  const progressId = generateProgressId(userId, courseId);
-  const eventsRef = collection(db, 'progress', progressId, 'events');
-  const q = query(eventsRef, orderBy('timestamp', 'desc'));
-
-  const snapshot = await getDocs(q);
-  const events = snapshot.docs.map(doc => doc.data() as ProgressEvent);
-
-  return events.slice(0, limitCount);
-}
-
-/**
- * Add time spent to progress (for background tracking).
+ * Add time spent to progress.
  */
 export async function addTimeSpent(
   userId: string,
   courseId: string,
   seconds: number
 ): Promise<void> {
-  const progress = await getProgressOrThrow(userId, courseId);
-  const progressRef = doc(db, 'progress', progress.id);
-
-  await updateDoc(progressRef, {
-    totalTimeSpentSeconds: progress.totalTimeSpentSeconds + seconds,
-    updatedAt: serverTimestamp(),
-  });
+  try {
+    const progress = await getProgressOrThrow(userId, courseId);
+    await apiClient.patch(`/progress/${progress.id}/`, {
+      total_time_spent: progress.totalTimeSpentSeconds + seconds,
+    });
+  } catch {
+    // Non-blocking
+  }
 }
 
 /**
@@ -332,23 +291,17 @@ export async function addTimeSpent(
 export async function getNextLesson(
   userId: string,
   courseId: string,
-  allLessonIds: string[] // Ordered list of all lesson IDs
+  allLessonIds: string[]
 ): Promise<string | null> {
   const progress = await getProgress(userId, courseId);
 
-  if (!progress) {
-    // Not enrolled or no progress — return first lesson
-    return allLessonIds[0] || null;
-  }
+  if (!progress) return allLessonIds[0] || null;
 
-  // Return the last viewed lesson, or the first uncompleted lesson
   if (progress.lastLessonId && !progress.completedLessonIds.includes(progress.lastLessonId)) {
     return progress.lastLessonId;
   }
 
-  // Find first uncompleted lesson
-  const nextLesson = allLessonIds.find(id => !progress.completedLessonIds.includes(id));
-  return nextLesson || null;
+  return allLessonIds.find(id => !progress.completedLessonIds.includes(id)) || null;
 }
 
 export const progressService = {

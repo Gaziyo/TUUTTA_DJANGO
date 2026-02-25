@@ -1,8 +1,10 @@
 """
 Base Django settings for tuutta_backend project.
 """
+import os
 from pathlib import Path
 from datetime import timedelta
+from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -29,7 +31,7 @@ LOCAL_APPS = [
     'apps.accounts',
     'apps.organizations',
     'apps.courses',
-    'apps.assessments',
+    'apps.assessments.apps.UassessmentsConfig',
     'apps.enrollments',
     'apps.progress',
     'apps.gamification',
@@ -38,6 +40,12 @@ LOCAL_APPS = [
     'apps.certificates',
     'apps.notifications',
     'apps.analytics',
+    'apps.webhooks',
+    # Cognitive OS apps
+    'apps.competencies',
+    'apps.knowledge',
+    'apps.learning_intelligence',
+    'apps.governance',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -103,6 +111,15 @@ STORAGES = {
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Email (SendGrid)
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
+SENDGRID_FROM_EMAIL = os.environ.get('SENDGRID_FROM_EMAIL', 'no-reply@tuutta.com')
+
+# Webhooks
+WEBHOOK_SIGNATURE_HEADER = 'X-Tuutta-Signature'
+WEBHOOK_EVENT_HEADER = 'X-Tuutta-Event'
+WEBHOOK_TIMESTAMP_HEADER = 'X-Tuutta-Timestamp'
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # REST Framework
@@ -120,6 +137,74 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# Celery beat schedules
+CELERY_BEAT_SCHEDULE = {
+    'dispatch-notifications': {
+        'task': 'apps.notifications.tasks.dispatch_pending_notifications',
+        'schedule': 300.0,
+    },
+    'dispatch-webhooks': {
+        'task': 'apps.webhooks.tasks.dispatch_pending_webhooks',
+        'schedule': 300.0,
+    },
+    'deadline-reminders': {
+        'task': 'apps.enrollments.tasks.send_deadline_reminders',
+        'schedule': crontab(hour=9, minute=0),
+    },
+    'overdue-enrollments': {
+        'task': 'apps.enrollments.tasks.check_overdue_enrollments',
+        'schedule': crontab(hour=6, minute=0),
+    },
+    'archive-old-courses': {
+        'task': 'apps.courses.tasks.archive_old_courses',
+        'schedule': crontab(hour=3, minute=0, day_of_month=1),
+    },
+    'retention-policy': {
+        'task': 'apps.organizations.tasks.apply_retention_policies',
+        'schedule': crontab(hour=4, minute=0, day_of_month=1),
+    },
+    'competency-snapshots': {
+        'task': 'apps.competencies.tasks.refresh_competency_snapshots',
+        'schedule': crontab(hour=6, minute=0, day_of_week=1),
+    },
+    'analytics-refresh': {
+        'task': 'apps.analytics.tasks.analytics_refresh_scheduler',
+        'schedule': crontab(hour=7, minute=0, day_of_week=1),
+    },
+    'genie-report-scheduler': {
+        'task': 'apps.analytics.tasks.genie_report_scheduler',
+        'schedule': 86400.0,
+    },
+    'manager-digest-scheduler': {
+        'task': 'apps.analytics.tasks.manager_digest_scheduler',
+        'schedule': crontab(hour=7, minute=0, day_of_week=1),
+    },
+    'manager-digest-processor': {
+        'task': 'apps.analytics.tasks.process_manager_digests_task',
+        'schedule': 3600.0,
+    },
+    'failure-risk-refresh': {
+        'task': 'apps.learning_intelligence.tasks.compute_failure_risk_task',
+        'schedule': crontab(hour=5, minute=0),
+        'args': (),
+    },
+    'adaptive-recommendations-refresh': {
+        'task': 'apps.learning_intelligence.tasks.generate_adaptive_recommendations_task',
+        'schedule': crontab(hour=5, minute=30),
+        'args': (),
+    },
+    'org-forecasting-refresh': {
+        'task': 'apps.analytics.tasks.compute_org_forecasting_task',
+        'schedule': crontab(hour=6, minute=0, day_of_week=1),
+        'args': (),
+    },
+    'adaptive-policy-optimization': {
+        'task': 'apps.learning_intelligence.tasks.optimize_adaptive_policy_task',
+        'schedule': crontab(hour=6, minute=30, day_of_week=1),
+        'args': (),
+    },
 }
 
 # JWT Settings

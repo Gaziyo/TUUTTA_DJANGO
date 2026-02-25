@@ -16,7 +16,7 @@ import {
   BookOpen, GripVertical, ChevronDown, Clock,
   TrendingUp, Target,
   FolderOpen,
-  Settings, PanelLeft, Play, Trash2
+  Settings, PanelLeft, Play, Trash2, RefreshCw
 } from 'lucide-react';
 
 // shadcn/ui Components
@@ -41,6 +41,8 @@ import { useELS } from '@/context/ELSContext';
 import { useLMSStore } from '@/store/lmsStore';
 import { useToast } from '@/hooks/use-toast';
 import { elsAnalysisService, elsDesignService, elsAIGenerationService, elsImplementationService, elsAnalyticsService, elsGovernanceService } from '@/services/els';
+import { knowledgeGraphService } from '@/services/knowledgeGraphService';
+import { gnnInsightService } from '@/services/gnnInsightService';
 import type {
   ELSPhase,
   ELSSkillGap,
@@ -429,6 +431,10 @@ function Phase2Analyze() {
     measurable: true
   });
   const [isCompleting, setIsCompleting] = useState(false);
+  const [knowledgeNodes, setKnowledgeNodes] = useState<any[]>([]);
+  const [knowledgeEdges, setKnowledgeEdges] = useState<any[]>([]);
+  const [gnnInsights, setGnnInsights] = useState<any[]>([]);
+  const [isGraphBuilding, setIsGraphBuilding] = useState(false);
 
   useEffect(() => {
     if (!currentOrg) return;
@@ -439,6 +445,31 @@ function Phase2Analyze() {
       void loadDepartments();
     }
   }, [currentOrg, departments.length, loadDepartments, loadMembers, members.length]);
+
+  useEffect(() => {
+    if (!currentOrg?.id) return;
+    knowledgeGraphService.listNodes(currentOrg.id).then(setKnowledgeNodes);
+    knowledgeGraphService.listEdges(currentOrg.id).then(setKnowledgeEdges);
+    gnnInsightService.listForOrg(currentOrg.id).then(setGnnInsights);
+  }, [currentOrg?.id]);
+
+  const handleBuildGraph = async () => {
+    if (!currentOrg?.id) return;
+    setIsGraphBuilding(true);
+    try {
+      await knowledgeGraphService.build(currentOrg.id);
+    } finally {
+      setIsGraphBuilding(false);
+      knowledgeGraphService.listNodes(currentOrg.id).then(setKnowledgeNodes);
+      knowledgeGraphService.listEdges(currentOrg.id).then(setKnowledgeEdges);
+    }
+  };
+
+  const handleRefreshGnn = async () => {
+    if (!currentOrg?.id) return;
+    await gnnInsightService.refresh(currentOrg.id);
+    gnnInsightService.listForOrg(currentOrg.id).then(setGnnInsights);
+  };
 
   useEffect(() => {
     if (!analysis?.targetAudience) return;
@@ -453,6 +484,14 @@ function Phase2Analyze() {
     return Array.from(new Set(roles));
   }, [members]);
 
+  const nodeLabelById = useMemo(() => {
+    const map: Record<string, string> = {};
+    knowledgeNodes.forEach(node => {
+      map[node.id] = node.label;
+    });
+    return map;
+  }, [knowledgeNodes]);
+
   const filteredMembers = useMemo(() => {
     return members.filter(member => {
       const deptMatch = selectedDepartments.length === 0 || (member.departmentId && selectedDepartments.includes(member.departmentId));
@@ -462,6 +501,78 @@ function Phase2Analyze() {
   }, [members, selectedDepartments, selectedRoles]);
 
   const estimatedLearners = selectedUsers.length > 0 ? selectedUsers.length : filteredMembers.length;
+
+  const graphPreview = useMemo(() => {
+    const width = 900;
+    const rowHeight = 88;
+    const columnWidth = 160;
+    const marginX = 60;
+    const marginY = 40;
+    const typeOrder = ['competency', 'bloom', 'chunk', 'assessment', 'learner', 'concept'];
+    const grouped = knowledgeNodes.reduce((acc: Record<string, any[]>, node) => {
+      const key = node.node_type || 'concept';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(node);
+      return acc;
+    }, {});
+
+    const positioned: Record<string, { id: string; x: number; y: number; node_type: string; label: string }> = {};
+    let maxRows = 1;
+
+    typeOrder.forEach((type, colIndex) => {
+      const nodes = grouped[type] || [];
+      maxRows = Math.max(maxRows, nodes.length || 1);
+      nodes.forEach((node, rowIndex) => {
+        positioned[node.id] = {
+          id: node.id,
+          x: marginX + colIndex * columnWidth,
+          y: marginY + rowIndex * rowHeight,
+          node_type: node.node_type,
+          label: node.label,
+        };
+      });
+    });
+
+    const additionalTypes = Object.keys(grouped).filter(type => !typeOrder.includes(type));
+    additionalTypes.forEach((type, offset) => {
+      const nodes = grouped[type] || [];
+      const colIndex = typeOrder.length + offset;
+      maxRows = Math.max(maxRows, nodes.length || 1);
+      nodes.forEach((node, rowIndex) => {
+        positioned[node.id] = {
+          id: node.id,
+          x: marginX + colIndex * columnWidth,
+          y: marginY + rowIndex * rowHeight,
+          node_type: node.node_type,
+          label: node.label,
+        };
+      });
+    });
+
+    const edges = knowledgeEdges
+      .map(edge => {
+        const source = positioned[edge.source];
+        const target = positioned[edge.target];
+        if (!source || !target) return null;
+        return {
+          id: edge.id,
+          x1: source.x,
+          y1: source.y,
+          x2: target.x,
+          y2: target.y,
+          weight: edge.weight || 0,
+          relation: edge.relation || '',
+        };
+      })
+      .filter(Boolean) as Array<{ id: string; x1: number; y1: number; x2: number; y2: number; weight: number; relation: string }>;
+
+    const nodes = Object.values(positioned);
+    const height = Math.max(260, marginY + maxRows * rowHeight + 40);
+    const totalColumns = typeOrder.length + additionalTypes.length;
+    const svgWidth = Math.max(width, marginX + Math.max(totalColumns, 1) * columnWidth + 40);
+
+    return { nodes, edges, width: svgWidth, height };
+  }, [knowledgeNodes, knowledgeEdges]);
 
   const ensureAnalysis = async () => {
     if (!currentOrg?.id || !project?.id) {
@@ -638,6 +749,8 @@ function Phase2Analyze() {
     { id: 'gaps', label: 'Skill Gap Analysis' },
     { id: 'compliance', label: 'Compliance Mapping' },
     { id: 'objectives', label: 'Learning Objectives' },
+    { id: 'knowledge-graph', label: 'Knowledge Graph' },
+    { id: 'gnn-insights', label: 'GNN Insights' },
   ];
 
   return (
@@ -1119,6 +1232,144 @@ function Phase2Analyze() {
                   <p className="text-muted-foreground">No learning objectives defined yet</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'knowledge-graph' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Knowledge Graph</h3>
+                <Button type="button" variant="outline" onClick={handleBuildGraph} disabled={isGraphBuilding}>
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isGraphBuilding ? 'animate-spin' : ''}`} />
+                  {isGraphBuilding ? 'Building...' : 'Build Graph'}
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Nodes</CardTitle>
+                    <CardDescription>{knowledgeNodes.length} nodes</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {knowledgeNodes.slice(0, 8).map((node) => (
+                      <div key={node.id} className="flex items-center justify-between">
+                        <span>{node.label}</span>
+                        <Badge variant="outline">{node.node_type}</Badge>
+                      </div>
+                    ))}
+                    {knowledgeNodes.length === 0 && (
+                      <p className="text-muted-foreground">No nodes yet. Build the graph to populate.</p>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Edges</CardTitle>
+                    <CardDescription>{knowledgeEdges.length} edges</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {knowledgeEdges.slice(0, 8).map((edge) => (
+                      <div key={edge.id} className="flex items-center justify-between">
+                        <span>{nodeLabelById[edge.source] || edge.source} → {nodeLabelById[edge.target] || edge.target}</span>
+                        <Badge variant="secondary">{edge.weight?.toFixed?.(2) ?? edge.weight}</Badge>
+                      </div>
+                    ))}
+                    {knowledgeEdges.length === 0 && (
+                      <p className="text-muted-foreground">No edges yet. Build the graph to populate.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Graph Viewer</CardTitle>
+                  <CardDescription>Concept → competency → Bloom → learner relationship map</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {graphPreview.nodes.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">Build the graph to preview relationships.</p>
+                  ) : (
+                    <div className="w-full overflow-auto rounded-xl border bg-muted/20">
+                      <svg width={graphPreview.width} height={graphPreview.height} className="min-w-[720px]">
+                        {graphPreview.edges.map(edge => (
+                          <g key={edge.id}>
+                            <line
+                              x1={edge.x1}
+                              y1={edge.y1}
+                              x2={edge.x2}
+                              y2={edge.y2}
+                              stroke="currentColor"
+                              strokeOpacity={0.25 + Math.min(0.55, edge.weight * 0.45)}
+                              strokeWidth={Math.max(1, edge.weight * 2)}
+                            />
+                            <title>{edge.relation || 'relation'} (w={edge.weight})</title>
+                          </g>
+                        ))}
+                        {graphPreview.nodes.map(node => (
+                          <g key={node.id}>
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r={16}
+                              className={cn(
+                                node.node_type === 'competency' && 'fill-blue-500/20 stroke-blue-500',
+                                node.node_type === 'chunk' && 'fill-emerald-500/20 stroke-emerald-500',
+                                node.node_type === 'bloom' && 'fill-amber-500/20 stroke-amber-500',
+                                node.node_type === 'learner' && 'fill-violet-500/20 stroke-violet-500',
+                                node.node_type === 'assessment' && 'fill-rose-500/20 stroke-rose-500',
+                                !['competency', 'chunk', 'bloom', 'learner', 'assessment'].includes(node.node_type) && 'fill-slate-500/20 stroke-slate-500',
+                              )}
+                              strokeWidth={1.5}
+                            />
+                            <text
+                              x={node.x + 22}
+                              y={node.y + 4}
+                              className="fill-current text-[11px]"
+                            >
+                              {node.label.length > 24 ? `${node.label.slice(0, 24)}…` : node.label}
+                            </text>
+                            <title>{node.label} ({node.node_type})</title>
+                          </g>
+                        ))}
+                      </svg>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'gnn-insights' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">GNN Insights</h3>
+                <Button type="button" variant="outline" onClick={handleRefreshGnn}>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refresh Insights
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {gnnInsights.length === 0 ? (
+                  <div className="text-muted-foreground">No GNN insights available.</div>
+                ) : (
+                  gnnInsights.map((insight) => (
+                    <Card key={insight.id}>
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">{insight.name}</p>
+                            <p className="text-xs text-muted-foreground">{insight.insight_type}</p>
+                          </div>
+                          <Badge variant="outline">{new Date(insight.created_at).toLocaleDateString()}</Badge>
+                        </div>
+                        <pre className="mt-3 text-xs bg-muted/40 p-3 rounded-lg overflow-auto">
+                          {JSON.stringify(insight.metrics, null, 2)}
+                        </pre>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
             </div>
           )}
         </CardContent>

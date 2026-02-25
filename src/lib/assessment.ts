@@ -1,30 +1,9 @@
 import { Question, Assessment } from '../types';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase';
-import { logger } from './logger';
-
-const chatCompletion = httpsCallable(functions, 'genieChatCompletion');
-const textToSpeech = httpsCallable(functions, 'genieTextToSpeech');
-const browserOpenAIKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined;
+import { apiClient } from './api';
+import { textToSpeech } from './ai';
 
 // Create an AbortController instance
 let currentAbortController: AbortController | null = null;
-
-const shouldFallbackToBrowserOpenAI = (error: unknown): boolean => {
-  if (!browserOpenAIKey) return false;
-  const code = String((error as { code?: string } | undefined)?.code || '').toLowerCase();
-  const message = String((error as { message?: string } | undefined)?.message || '').toLowerCase();
-  const detailsRaw = (error as { details?: unknown } | undefined)?.details;
-  const details = typeof detailsRaw === 'string'
-    ? detailsRaw.toLowerCase()
-    : detailsRaw ? JSON.stringify(detailsRaw).toLowerCase() : '';
-
-  return code.includes('functions/internal')
-    || code.includes('functions/unavailable')
-    || message.includes('connection error')
-    || details.includes('connection error')
-    || details.includes('cannot reach openai');
-};
 
 const chatCompletionWithFallback = async (payload: {
   model?: string;
@@ -34,99 +13,16 @@ const chatCompletionWithFallback = async (payload: {
   temperature?: number;
   maxTokens?: number;
 }): Promise<{ content: string }> => {
-  try {
-    const result = await chatCompletion(payload);
-    const content = (result.data as { content?: string } | undefined)?.content;
-    if (!content) throw new Error('No response received from assessment generator');
-    return { content };
-  } catch (error) {
-    if (!shouldFallbackToBrowserOpenAI(error)) throw error;
-    if (!browserOpenAIKey) throw error;
-
-    const modelCandidates = [payload.model, 'gpt-4o-mini', 'gpt-4.1-mini'].filter(Boolean) as string[];
-    let lastError: unknown = null;
-    for (const model of modelCandidates) {
-      try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${browserOpenAIKey}`
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: payload.systemPrompt },
-              { role: 'user', content: payload.userPrompt }
-            ],
-            response_format: payload.responseFormat ? { type: payload.responseFormat } : undefined,
-            temperature: payload.temperature ?? 0.7,
-            max_tokens: payload.maxTokens ?? 1000
-          })
-        });
-
-        if (!response.ok) {
-          lastError = new Error(`Browser OpenAI assessment fallback failed (${response.status})`);
-          continue;
-        }
-
-        const data = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
-        const content = data.choices?.[0]?.message?.content;
-        if (!content) {
-          lastError = new Error('No content from browser OpenAI assessment fallback');
-          continue;
-        }
-        logger.warn('[Assessment] Falling back to browser OpenAI because callable failed.');
-        return { content };
-      } catch (fallbackError) {
-        lastError = fallbackError;
-      }
-    }
-
-    throw lastError ?? error;
-  }
-};
-
-const textToSpeechWithFallback = async (payload: {
-  text: string;
-  voice?: string;
-}): Promise<{ base64Audio: string }> => {
-  try {
-    const result = await textToSpeech(payload);
-    const base64Audio = (result.data as { base64Audio?: string } | undefined)?.base64Audio;
-    if (!base64Audio) throw new Error('No audio returned');
-    return { base64Audio };
-  } catch (error) {
-    if (!shouldFallbackToBrowserOpenAI(error)) throw error;
-    if (!browserOpenAIKey) throw error;
-
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${browserOpenAIKey}`
-      },
-      body: JSON.stringify({
-        model: 'tts-1',
-        voice: payload.voice || 'nova',
-        input: payload.text.slice(0, 4096),
-        response_format: 'mp3'
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Browser OpenAI TTS fallback failed (${response.status})`);
-    }
-
-    const audioData = await response.arrayBuffer();
-    const base64Audio = btoa(
-      Array.from(new Uint8Array(audioData))
-        .map(byte => String.fromCharCode(byte))
-        .join('')
-    );
-    logger.warn('[Assessment] Falling back to browser OpenAI TTS because callable failed.');
-    return { base64Audio };
-  }
+  const { data } = await apiClient.post('/ai/chat/', {
+    messages: [
+      { role: 'system', content: payload.systemPrompt },
+      { role: 'user', content: payload.userPrompt },
+    ],
+    model: payload.model || 'gpt-4o-mini',
+  });
+  const content = (data as { content?: string })?.content;
+  if (!content) throw new Error('No response received from assessment generator');
+  return { content };
 };
 
 async function generateAudioPrompt(text: string): Promise<string> {
@@ -135,8 +31,8 @@ async function generateAudioPrompt(text: string): Promise<string> {
       throw new Error('No text provided for audio prompt');
     }
 
-    const payload = await textToSpeechWithFallback({ text, voice: 'nova' });
-    return `data:audio/mp3;base64,${payload.base64Audio}`;
+    const base64Audio = await textToSpeech(text, 'nova');
+    return `data:audio/mp3;base64,${base64Audio}`;
   } catch (error) {
     console.error('Audio generation error:', error);
     if (error instanceof Error && error.message.includes('Failed to fetch')) {
@@ -521,6 +417,8 @@ Return in this exact JSON format:
         throw new Error('Invalid assessment type');
     }
 
+    prompt = `${prompt}\n\nInclude for every question:\n- "bloomLevel": a number 1-6\n- "bloomLabel": one of "remember", "understand", "apply", "analyze", "evaluate", "create"`;
+
     const result = await chatCompletionWithFallback({
       model: "gpt-4-turbo-preview",
       systemPrompt,
@@ -562,6 +460,8 @@ Return in this exact JSON format:
           // noteHints removed from base - will be added in relevant cases (e.g., listening)
           mathExpression: q.mathExpression || '',
           graphData: q.graphData || null,
+          bloomLevel: q.bloomLevel ?? q.bloom_level ?? undefined,
+          bloomLabel: q.bloomLabel ?? q.bloom_label ?? undefined,
           // Add source if sourceUrl is provided
           ...(sourceUrl && { source: { url: sourceUrl } })
         };

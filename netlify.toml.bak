@@ -1,0 +1,24 @@
+# netlify.toml
+
+# Base build settings (adjust if needed)
+[build]
+  command = "npm run build" # Or your actual build command
+  publish = "dist"          # Or your actual publish directory
+  functions = "netlify/functions"
+
+# Set the Node.js bundler globally for all functions
+# 'nft' (Node File Trace) is often better at resolving dependencies than the default.
+[functions]
+  node_bundler = "nft"
+
+# Function-specific settings for 'scrape'
+# [functions.scrape] # We might not need function-specific settings with nft
+  # Explicitly include node-fetch for bundling (Commented out - nft should handle this)
+  # This helps when using dynamic imports
+  # included_files = ["node_modules/node-fetch/**"]
+
+  # Optional: Increase timeout if needed (requires Pro plan or higher)
+  # timeout = 26 
+
+  # Optional: Increase memory if needed (requires Pro plan or higher)
+  # memory = 512

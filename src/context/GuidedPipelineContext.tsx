@@ -4,7 +4,6 @@ import { useStore } from '../store';
 import { useLMSStore } from '../store/lmsStore';
 import { addGuidedProgramVersion, loadGuidedPrograms, saveGuidedProgram, toGuidedUserError } from '../services/guidedService';
 import { userService } from '../services/userService';
-import { auth } from '../lib/firebase';
 
 export type GuidedStage = 'ingest' | 'analyze' | 'design' | 'develop' | 'implement' | 'evaluate';
 
@@ -111,7 +110,7 @@ export function GuidedPipelineProvider({ children }: { children: React.ReactNode
     if (!currentOrg?.id || !user?.id) return;
     if (membershipReady) return;
 
-    if (!auth.currentUser || auth.currentUser.uid !== user.id) {
+    if (!user?.id) {
       throw new Error('Please sign in and try again.');
     }
 

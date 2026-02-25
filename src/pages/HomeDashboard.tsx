@@ -3,7 +3,7 @@
 // Unified home page showing courses, paths, activity, and quick stats
 // ============================================================================
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   Map as MapIcon,
@@ -19,11 +19,14 @@ import {
   Target,
   Sparkles,
   Calendar,
-  Bell
+  Bell,
+  AlertCircle
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useStore } from '../store';
 import { useLMSStore } from '../store/lmsStore';
+import cognitiveProfileService from '../services/cognitiveProfileService';
+import adaptiveRecommendationService from '../services/adaptiveRecommendationService';
 
 interface HomeDashboardProps {
   isDarkMode: boolean;
@@ -43,6 +46,10 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
     currentMember
   } = useLMSStore();
 
+  const [cognitiveProfile, setCognitiveProfile] = useState<any>(null);
+  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [failureRisks, setFailureRisks] = useState<any[]>([]);
+
   const userLevel = getUserLevel();
   const userXP = getUserXP();
   const streak = getLearningStreak();
@@ -55,6 +62,14 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
       loadLearningPaths();
     }
   }, [currentOrg, loadCourses, loadEnrollments, loadLearningPaths]);
+
+  useEffect(() => {
+    const orgId = currentOrg?.id;
+    if (!orgId) return;
+    cognitiveProfileService.getForCurrentUser(orgId).then(setCognitiveProfile);
+    adaptiveRecommendationService.listForOrg(orgId).then(setRecommendations);
+    adaptiveRecommendationService.listFailureRisks(orgId).then(setFailureRisks);
+  }, [currentOrg]);
 
   const userEnrollments = useMemo(() => {
     if (!currentMember) return [];
@@ -87,6 +102,15 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
 
   const inProgressCourses = enrichedCourses.filter(c => c.progress > 0 && c.progress < 100);
   const recommendedCourses = enrichedCourses.filter(c => c.progress === 0);
+
+  const dominantBloom = cognitiveProfile
+    ? cognitiveProfileService.getDominantBloomLevel(cognitiveProfile)
+    : null;
+  const dominantModality = cognitiveProfile
+    ? cognitiveProfileService.getDominantModality(cognitiveProfile)
+    : null;
+  const topRecommendation = recommendations[0];
+  const highRisk = failureRisks.find(risk => risk.risk_level === 'high');
 
   const pathSummaries = useMemo(() => {
     return learningPaths.map(path => {
@@ -196,6 +220,56 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
         </div>
       </div>
 
+      {/* Cognitive Status + AI Recommendation + Risk Alert */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+        <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-sm`}>
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className={`w-4 h-4 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
+            <h3 className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+              Cognitive Status
+            </h3>
+          </div>
+          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            Dominant Bloom level: {dominantBloom ? `L${dominantBloom}` : '—'}
+          </p>
+          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            Strongest modality: {dominantModality ?? '—'}
+          </p>
+        </div>
+
+        <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-sm`}>
+          <div className="flex items-center gap-2 mb-2">
+            <Target className={`w-4 h-4 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            <h3 className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+              AI Recommendation
+            </h3>
+          </div>
+          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            {topRecommendation?.reason ?? 'No recommendations yet.'}
+          </p>
+          {topRecommendation?.payload?.course_id && (
+            <button
+              className={`mt-2 text-xs ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}
+              onClick={() => openCourse(topRecommendation.payload.course_id as string, 'Recommended Course')}
+            >
+              View recommendation
+            </button>
+          )}
+        </div>
+
+        <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-gray-800' : 'bg-white'} shadow-sm`}>
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className={`w-4 h-4 ${isDarkMode ? 'text-rose-400' : 'text-rose-600'}`} />
+            <h3 className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+              At-Risk Alert
+            </h3>
+          </div>
+          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            {highRisk ? `High risk in course ${highRisk.course}` : 'No high-risk alerts.'}
+          </p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content - 2 columns */}
         <div className="lg:col-span-2 space-y-6">
@@ -247,11 +321,15 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
                             {course.name}
                           </h3>
                         </div>
-                        <button className={`p-2 rounded-lg ${
+                        <button
+                          aria-label={`Play ${course.name}`}
+                          title={`Play ${course.name}`}
+                          className={`p-2 rounded-lg ${
                           isDarkMode
                             ? 'bg-indigo-600 hover:bg-indigo-700'
                             : 'bg-indigo-500 hover:bg-indigo-600'
-                        } text-white`}>
+                          } text-white`}
+                        >
                           <Play className="w-4 h-4" />
                         </button>
                       </div>
@@ -259,12 +337,12 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
                         {course.lessonsCompleted} of {course.totalLessons} lessons completed
                       </p>
                       <div className="mt-2">
-                        <div className={`w-full h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                          <div
-                            className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500"
-                            style={{ width: `${course.progress}%` }}
-                          />
-                        </div>
+                        <progress
+                          className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-indigo`}
+                          value={course.progress}
+                          max={100}
+                          aria-label={`${course.name} progress`}
+                        />
                         <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
                           {course.progress}% complete
                         </p>
@@ -395,12 +473,12 @@ export default function HomeDashboard({ isDarkMode }: HomeDashboardProps) {
                       </div>
                     </div>
                     <div className="mt-4">
-                      <div className={`w-full h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                        <div
-                          className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500"
-                          style={{ width: `${path.progress}%` }}
-                        />
-                      </div>
+                      <progress
+                        className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-blue`}
+                        value={path.progress}
+                        max={100}
+                        aria-label={`${path.name} progress`}
+                      />
                     </div>
                   </div>
                 ))}

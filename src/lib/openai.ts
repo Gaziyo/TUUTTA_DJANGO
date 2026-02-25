@@ -1,14 +1,18 @@
-import { httpsCallable } from 'firebase/functions';
-import { auth, functions } from './firebase';
+/**
+ * OpenAI / Tutor Response Library
+ *
+ * Delegates to Django REST API: /ai/chat/
+ * Replaces Firebase Cloud Functions callables (genieChatCompletion, genieAnalyzeImage).
+ */
+
 import { FileUpload } from '../types';
 import { extractTextFromFile } from './fileProcessor';
 import { performWebSearch, formatSearchResults } from './search';
 import { logger } from './logger';
 import { retryWithBackoff } from './retry';
 import { isTransientError, toUserErrorMessage } from './errorHandling';
+import { apiClient } from './api';
 
-const chatCompletion = httpsCallable(functions, 'genieChatCompletion');
-const analyzeImageCall = httpsCallable(functions, 'genieAnalyzeImage');
 const MAX_MESSAGE_HISTORY = 8;
 const MAX_MESSAGE_CHARS = 1800;
 const MAX_PROMPT_CHARS = 12000;
@@ -61,22 +65,34 @@ const shouldUseAttachedFileContext = (
 
 async function analyzeImage(file: FileUpload): Promise<string> {
   try {
-    if (!auth.currentUser) {
-      throw new Error('Please sign in to analyze images.');
-    }
-
     if (!file.content) {
       throw new Error('Image content is missing');
     }
 
-    const response = await retryWithBackoff(
-      () => analyzeImageCall({
-        imageUrl: file.content,
-        detail: 'high'
+    // Django /ai/chat/ passes messages through to OpenAI — vision format is supported.
+    const { data } = await retryWithBackoff(
+      () => apiClient.post('/ai/chat/', {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: file.content, detail: 'high' },
+              },
+              {
+                type: 'text',
+                text: 'Analyze this image in detail. Describe what you see, including any text, diagrams, charts, or visual elements.',
+              },
+            ],
+          },
+        ],
+        model: 'gpt-4o',
       }),
       { retries: 2, shouldRetry: isTransientError }
     );
-    const content = (response.data as { content?: string })?.content;
+
+    const content = (data as { content?: string })?.content;
     if (!content) {
       throw new Error('No analysis generated for the image');
     }
@@ -85,12 +101,6 @@ async function analyzeImage(file: FileUpload): Promise<string> {
   } catch (error) {
     console.error('Image analysis error:', error);
     if (error instanceof Error) {
-      if (error.message.includes('permission-denied')) {
-        throw new Error('You do not have permission to analyze images.');
-      }
-      if (error.message.includes('unauthenticated')) {
-        throw new Error('Please sign in to analyze images.');
-      }
       if (error.message.includes('unavailable') || error.message.includes('deadline-exceeded')) {
         throw new Error('The analysis service is temporarily unavailable. Please try again.');
       }
@@ -128,10 +138,6 @@ export const generateTutorResponse = async (
     currentAbortController = new AbortController();
     const signal = currentAbortController.signal;
 
-    if (!auth.currentUser) {
-      throw new Error('Please sign in to use Genie AI.');
-    }
-
     let context = '';
     let fileContext = '';
     let webContext = '';
@@ -143,7 +149,7 @@ export const generateTutorResponse = async (
     // Process files only when explicitly requested in the latest user message.
     if (files && files.length > 0 && shouldIncludeFileContext) {
       const fileContents: string[] = [];
-      
+
       for (const file of files) {
         // Check if the request has been aborted
         if (signal.aborted) {
@@ -204,7 +210,7 @@ export const generateTutorResponse = async (
         console.error('[OpenAI] Web search error:', error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error('[OpenAI] Error details:', errorMessage);
-        // Don't add error message to validMessages - just let it proceed without search results
+        // Don't fail the whole request if search fails — proceed without search results
       }
     }
 
@@ -279,16 +285,19 @@ ${context ? '\nAvailable context from materials:\n' + context : ''}`;
       .join('\n')
       .slice(0, MAX_PROMPT_CHARS);
 
-    const response = await retryWithBackoff(
-      () => chatCompletion({
-        systemPrompt,
-        userPrompt,
+    const { data } = await retryWithBackoff(
+      () => apiClient.post('/ai/chat/', {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        model: 'gpt-4o-mini',
         temperature: 0.5,
-        maxTokens: 1000
+        max_tokens: 1000,
       }),
       { retries: 2, shouldRetry: isTransientError }
     );
-    const content = (response.data as { content?: string })?.content;
+    const content = (data as { content?: string })?.content;
 
     currentAbortController = null;
     if (!content) throw new Error('No response generated');
@@ -299,26 +308,8 @@ ${context ? '\nAvailable context from materials:\n' + context : ''}`;
     if (error instanceof Error && error.message === 'Request cancelled') {
       throw new Error('Chat response cancelled');
     }
-    const firebaseCode = (error as { code?: string } | undefined)?.code;
-    const firebaseMessage = (error as { message?: string } | undefined)?.message;
-    const firebaseDetails = (error as { details?: unknown } | undefined)?.details;
-    console.error('Error generating response:', {
-      error,
-      code: firebaseCode,
-      message: firebaseMessage,
-      details: firebaseDetails
-    });
+    console.error('Error generating response:', error);
     const userMessage = toUserErrorMessage(error, 'Failed to generate response.');
-    if (
-      import.meta.env.DEV
-      && userMessage === 'Failed to generate response.'
-      && firebaseCode
-    ) {
-      const detailsText = typeof firebaseDetails === 'string'
-        ? firebaseDetails
-        : firebaseDetails ? JSON.stringify(firebaseDetails) : '';
-      throw new Error(`Failed to generate response (${firebaseCode}${detailsText ? `: ${detailsText}` : ''}).`);
-    }
     throw new Error(userMessage);
   } finally {
     currentAbortController = null;

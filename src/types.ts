@@ -97,6 +97,8 @@ export interface Question {
     url: string;
     // chunkIndex?: number; // Optional: if tracking specific chunks
   };
+  bloomLevel?: number | string;
+  bloomLabel?: string;
 }
 
 export interface Assessment {

@@ -1,30 +1,40 @@
 import type { LearningPath } from '../types/lms';
-import * as lmsService from '../lib/lmsService';
 import { serviceEvents } from './events';
 
+// Learning paths are not yet implemented in the Django backend.
+// These stubs prevent Firebase crashes during migration.
 export const learningPathService = {
-  create: async (learningPath: Omit<LearningPath, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const created = await lmsService.createLearningPath(learningPath);
-    serviceEvents.emit('learningPath.created', { learningPathId: created.id, orgId: created.orgId });
-    return created;
+  create: async (learningPath: Omit<LearningPath, 'id' | 'createdAt' | 'updatedAt'>): Promise<LearningPath> => {
+    const stub: LearningPath = {
+      id: `lp_${Date.now()}`,
+      ...learningPath,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    serviceEvents.emit('learningPath.created', { learningPathId: stub.id, orgId: stub.orgId });
+    return stub;
   },
-  get: (pathId: string) => lmsService.getLearningPath(pathId),
-  list: (orgId: string, options?: { status?: 'draft' | 'published' | 'archived'; limit?: number }) =>
-    lmsService.getLearningPaths(orgId, options),
-  update: async (pathId: string, updates: Partial<LearningPath>) => {
-    await lmsService.updateLearningPath(pathId, updates);
+
+  get: async (_pathId: string): Promise<LearningPath | null> => null,
+
+  list: async (
+    _orgId: string,
+    _options?: { status?: 'draft' | 'published' | 'archived'; limit?: number }
+  ): Promise<LearningPath[]> => [],
+
+  update: async (pathId: string, _updates: Partial<LearningPath>): Promise<void> => {
     serviceEvents.emit('learningPath.updated', { learningPathId: pathId });
   },
-  publish: async (pathId: string) => {
-    await lmsService.publishLearningPath(pathId);
+
+  publish: async (pathId: string): Promise<void> => {
     serviceEvents.emit('learningPath.published', { learningPathId: pathId });
   },
-  archive: async (pathId: string) => {
-    await lmsService.archiveLearningPath(pathId);
+
+  archive: async (pathId: string): Promise<void> => {
     serviceEvents.emit('learningPath.archived', { learningPathId: pathId });
   },
-  remove: async (pathId: string) => {
-    await lmsService.deleteLearningPath(pathId);
+
+  remove: async (pathId: string): Promise<void> => {
     serviceEvents.emit('learningPath.deleted', { learningPathId: pathId });
   },
 };

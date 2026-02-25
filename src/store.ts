@@ -1,12 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Note, ChatMessage, FileUpload, User, AppSettings, ChatSession, Folder, Achievement, UserLevel, LearningStreak, Assessment } from './types';
-import { auth } from './lib/firebase';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-
-} from 'firebase/auth';
+import { useAuthStore } from './lib/authStore';
 import { dataGateway } from './lib/dataGateway';
 import * as storageService from './lib/storage';
 
@@ -208,8 +203,6 @@ const generateUUID = (): string => {
   });
 };
 
-const isPermissionDeniedError = (error: any): boolean =>
-  error?.code === 'permission-denied' || error?.code === 'firestore/permission-denied';
 
 export const useStore = create<AppState>()(
   persist(
@@ -219,119 +212,29 @@ export const useStore = create<AppState>()(
       user: null,
       currentChatId: null,
 
-      // Authentication functions
+      // Authentication functions — delegate to authStore (Django JWT)
       registerUser: async (email: string, password: string) => {
-        try {
-          // Create user with Firebase Auth
-          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-          const user = userCredential.user;
-
-          if (!user) {
-            throw new Error('Registration failed. Please try again.');
-          }
-
-          // Create user profile in Firestore
-          const name = email.split('@')[0];
-          await dataGateway.legacy.createUserProfile(user.uid, email, name, DEFAULT_SETTINGS);
-
-          // Initialize user data
-          try {
-            await dataGateway.legacy.setUserData(user.uid, DEFAULT_USER_DATA);
-          } catch (error: any) {
-            if (!isPermissionDeniedError(error)) throw error;
-            console.warn('Skipping legacy userData initialization due to Firestore rules.');
-          }
-
+        const name = email.split('@')[0];
+        await useAuthStore.getState().register({ email, username: name, password, password2: password, display_name: name });
+        const authUser = useAuthStore.getState().user;
+        if (authUser) {
           set({
-            user: {
-              id: user.uid,
-              email: user.email || email,
-              name,
-              settings: DEFAULT_SETTINGS
-            },
-            userData: {
-              [user.uid]: DEFAULT_USER_DATA
-            }
+            user: { id: authUser.id, email: authUser.email, name: authUser.display_name || name, settings: DEFAULT_SETTINGS },
+            userData: { [authUser.id]: DEFAULT_USER_DATA }
           });
-        } catch (error: any) {
-          console.error('Registration error:', error);
-          if (error.code === 'auth/email-already-in-use') {
-            throw new Error('This email is already registered. Please sign in instead.');
-          }
-          throw error;
         }
       },
 
       loginUser: async (email: string, password: string) => {
-        try {
-          // Sign in with Firebase Auth
-          const userCredential = await signInWithEmailAndPassword(auth, email, password);
-          const user = userCredential.user;
-
-          if (!user) {
-            throw new Error('Login failed. Please try again.');
-          }
-
-          // Fetch user profile from Firestore
-          let userProfile: any = null;
-          try {
-            userProfile = await dataGateway.legacy.getUserProfile(user.uid);
-          } catch (error: any) {
-            if (!isPermissionDeniedError(error)) throw error;
-            console.warn('Profile read denied by Firestore rules; continuing with defaults.');
-          }
-
-          // If profile doesn't exist, create one
-          if (!userProfile) {
-            const name = email.split('@')[0];
-            await dataGateway.legacy.createUserProfile(user.uid, email, name, DEFAULT_SETTINGS);
-            try {
-              await dataGateway.legacy.setUserData(user.uid, DEFAULT_USER_DATA);
-            } catch (error: any) {
-              if (!isPermissionDeniedError(error)) throw error;
-              console.warn('Skipping legacy userData initialization due to Firestore rules.');
-            }
-
-            set({
-              user: {
-                id: user.uid,
-                email: user.email || email,
-                name,
-                settings: DEFAULT_SETTINGS
-              },
-              userData: {
-                [user.uid]: DEFAULT_USER_DATA
-              }
-            });
-            return;
-          }
-
-          // Fetch user data
-          let userData: Partial<UserData> = DEFAULT_USER_DATA;
-          try {
-            userData = await dataGateway.legacy.getUserData(user.uid) || DEFAULT_USER_DATA;
-          } catch (error: any) {
-            if (!isPermissionDeniedError(error)) throw error;
-            console.warn('Legacy userData read denied by Firestore rules; using defaults.');
-          }
-
+        await useAuthStore.getState().login(email, password);
+        const authUser = useAuthStore.getState().user;
+        if (authUser) {
           set({
-            user: {
-              id: user.uid,
-              email: userProfile.email || user.email || email,
-              name: userProfile.name || userProfile.displayName || email.split('@')[0],
-              settings: userProfile.settings || DEFAULT_SETTINGS
-            },
-            userData: {
-              [user.uid]: userData as any
-            }
+            user: { id: authUser.id, email: authUser.email, name: authUser.display_name || authUser.username || email.split('@')[0], settings: DEFAULT_SETTINGS },
+            userData: { [authUser.id]: DEFAULT_USER_DATA }
           });
-        } catch (error: any) {
-          console.error('Login error:', error);
-          if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
-            throw new Error('Invalid email or password. Please try again.');
-          }
-          throw error;
+        } else {
+          throw new Error('Invalid email or password. Please try again.');
         }
       },
 

@@ -6,6 +6,7 @@ import { useLMSStore } from '../../store/lmsStore';
 import AdminPageHeader from './AdminPageHeader';
 import AdminSection from './AdminSection';
 import AdminToolbar from './AdminToolbar';
+import { apiClient } from '../../lib/api';
 import {
   exportCertificatesTemplate,
   exportToCSV,
@@ -18,8 +19,6 @@ import GenieTutorPanel from './GenieTutorPanel';
 import { buildGenieTutorContext } from '../../lib/genieTutorContext';
 import { assessmentService } from '../../services/assessmentService';
 import type { AssessmentResult } from '../../types/lms';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../lib/firebase';
 
 interface GenieComplianceProps {
   isDarkMode?: boolean;
@@ -529,19 +528,17 @@ const GenieCompliance: React.FC<GenieComplianceProps> = ({ isDarkMode = false, e
     setEvidenceMessage(null);
     setEvidenceBusy(true);
     try {
-      const call = httpsCallable(functions, 'genieEvidenceExport');
-      const payload = {
-        orgId: currentOrg.id,
-        startDate: dateRange?.start ? dateRange.start.getTime() : null,
-        endDate: dateRange?.end ? dateRange.end.getTime() : null,
-      };
-      const result = await call(payload);
-      const data = result.data as { url?: string };
+      const startDate = reportStart ? new Date(reportStart).getTime() : null;
+      const endDate = reportEnd ? new Date(reportEnd).getTime() : null;
+      const { data } = await apiClient.post(`/organizations/${currentOrg.id}/evidence-export/`, {
+        startDate,
+        endDate,
+      });
       if (data?.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer');
-        setEvidenceMessage('Evidence package generated.');
+        window.open(data.url, '_blank');
+        setEvidenceMessage('Evidence package ready. Download started.');
       } else {
-        setEvidenceMessage('Export completed, but no URL returned.');
+        setEvidenceMessage('Evidence export completed, but no download URL was returned.');
       }
     } catch {
       setEvidenceMessage('Failed to generate evidence package.');
@@ -657,22 +654,36 @@ const GenieCompliance: React.FC<GenieComplianceProps> = ({ isDarkMode = false, e
         <AdminSection title="Compliance Reports & Evidence" subtitle="Generate exports and audit-ready evidence packages." isDarkMode={themeDark} minHeight="200px">
           <div className="flex flex-wrap items-end gap-3 mb-4">
             <div className="flex flex-col gap-1">
-              <label className={`text-xs ${themeDark ? 'text-gray-400' : 'text-gray-500'}`}>Start date</label>
+              <label
+                htmlFor="compliance-report-start"
+                className={`text-xs ${themeDark ? 'text-gray-400' : 'text-gray-500'}`}
+              >
+                Start date
+              </label>
               <input
+                id="compliance-report-start"
                 type="date"
                 value={reportStart}
                 onChange={(e) => setReportStart(e.target.value)}
+                title="Report start date"
                 className={`px-3 py-2 rounded-lg border text-sm ${
                   themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
                 }`}
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className={`text-xs ${themeDark ? 'text-gray-400' : 'text-gray-500'}`}>End date</label>
+              <label
+                htmlFor="compliance-report-end"
+                className={`text-xs ${themeDark ? 'text-gray-400' : 'text-gray-500'}`}
+              >
+                End date
+              </label>
               <input
+                id="compliance-report-end"
                 type="date"
                 value={reportEnd}
                 onChange={(e) => setReportEnd(e.target.value)}
+                title="Report end date"
                 className={`px-3 py-2 rounded-lg border text-sm ${
                   themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
                 }`}
@@ -760,6 +771,8 @@ const GenieCompliance: React.FC<GenieComplianceProps> = ({ isDarkMode = false, e
             <select
               value={issueUserId}
               onChange={(e) => setIssueUserId(e.target.value)}
+              aria-label="Select learner for manual certificate"
+              title="Select learner for manual certificate"
               className={`px-3 py-2 rounded-lg border text-sm min-w-[220px] ${
                 themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
               }`}
@@ -772,6 +785,8 @@ const GenieCompliance: React.FC<GenieComplianceProps> = ({ isDarkMode = false, e
             <select
               value={issueCourseId}
               onChange={(e) => setIssueCourseId(e.target.value)}
+              aria-label="Select course for manual certificate"
+              title="Select course for manual certificate"
               className={`px-3 py-2 rounded-lg border text-sm min-w-[220px] ${
                 themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
               }`}
@@ -786,6 +801,8 @@ const GenieCompliance: React.FC<GenieComplianceProps> = ({ isDarkMode = false, e
               value={expiryDays}
               onChange={(e) => setExpiryDays(e.target.value)}
               placeholder="Expiry days (optional)"
+              aria-label="Certificate expiry days"
+              title="Certificate expiry days"
               className={`px-3 py-2 rounded-lg border text-sm w-44 ${
                 themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
               }`}
@@ -815,6 +832,8 @@ const GenieCompliance: React.FC<GenieComplianceProps> = ({ isDarkMode = false, e
                 <select
                   value={approvalStatusFilter}
                   onChange={(e) => setApprovalStatusFilter(e.target.value as typeof approvalStatusFilter)}
+                  aria-label="Filter approvals by status"
+                  title="Filter approvals by status"
                   className={`px-3 py-2 rounded-lg border text-sm ${
                     themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
                   }`}

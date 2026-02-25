@@ -1,18 +1,31 @@
-import { addDoc, collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+/**
+ * Guided Service
+ *
+ * Cognitive OS — ELS Pipeline (ADDIE + Cognitive) layer.
+ * Delegates to Django REST API:
+ *   /organizations/{orgId}/els-projects/
+ *
+ * GuidedProgram maps to ELSProject.
+ * Full program state is stored in ELSProject.phases_data.guided (JSON snapshot).
+ * Phase milestones are also persisted via the ELSProject phase actions.
+ */
+
+import { apiClient } from '../lib/api';
 import type { GuidedProgram, GuidedStage } from '../context/GuidedPipelineContext';
 import type { FileUpload } from '../types';
 import { retryWithBackoff } from '../lib/retry';
 import { isTransientError, toUserErrorMessage } from '../lib/errorHandling';
 import { observabilityService } from './observabilityService';
 
-const COLLECTION = 'guidedPrograms';
+// ─── ID Cache ─────────────────────────────────────────────────────────────────
+// Maps local guided_* IDs → Django ELSProject UUIDs for the session lifetime.
+const guidedProjectIdCache = new Map<string, string>();
 
-function guidedCollection(orgId: string) {
-  return collection(db, 'organizations', orgId, COLLECTION);
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
-
-const STAGE_ORDER: GuidedStage[] = ['ingest', 'analyze', 'design', 'develop', 'implement', 'evaluate'];
 
 async function logGuidedAction(input: Parameters<typeof observabilityService.logUserAction>[0]) {
   try {
@@ -29,6 +42,86 @@ async function logGuidedIngestion(input: Parameters<typeof observabilityService.
     // Keep guided persistence resilient when telemetry infra is unavailable.
   }
 }
+
+// ─── ELSProject → GuidedProgram mapper ───────────────────────────────────────
+
+function mapELSProject(project: Record<string, unknown>): GuidedProgram {
+  const phasesData = (project.phases_data as Record<string, unknown>) ?? {};
+  const snapshot = (phasesData.guided as Record<string, unknown>) ?? {};
+  const djangoId = project.id as string;
+  const localId = (snapshot.id as string) || (phasesData.local_id as string) || djangoId;
+
+  // Populate session cache
+  if (localId && djangoId) {
+    guidedProjectIdCache.set(localId, djangoId);
+  }
+
+  // Derive stage statuses from phase_records if snapshot doesn't have them
+  const phaseRecords = (project.phase_records as Record<string, unknown>[]) ?? [];
+  const derivedStageStatus: Partial<Record<GuidedStage, 'pending' | 'in_progress' | 'completed'>> = {};
+  for (const rec of phaseRecords) {
+    const phase = rec.phase as GuidedStage;
+    const status = rec.status as string;
+    if (['ingest', 'analyze', 'design', 'develop', 'implement', 'evaluate'].includes(phase)) {
+      derivedStageStatus[phase] =
+        status === 'completed' ? 'completed' : status === 'in_progress' ? 'in_progress' : 'pending';
+    }
+  }
+
+  const defaultStageStatus: GuidedProgram['stageStatus'] = {
+    ingest: derivedStageStatus.ingest ?? 'pending',
+    analyze: derivedStageStatus.analyze ?? 'pending',
+    design: derivedStageStatus.design ?? 'pending',
+    develop: derivedStageStatus.develop ?? 'pending',
+    implement: derivedStageStatus.implement ?? 'pending',
+    evaluate: derivedStageStatus.evaluate ?? 'pending',
+  };
+
+  return {
+    id: localId,
+    name: (snapshot.name as string) || (project.name as string) || 'Guided Program',
+    createdAt: project.created_at ? new Date(project.created_at as string) : new Date(),
+    updatedAt: project.updated_at ? new Date(project.updated_at as string) : new Date(),
+    sources: (snapshot.sources as FileUpload[]) ?? [],
+    analysis: (snapshot.analysis as GuidedProgram['analysis']) ?? undefined,
+    design: (snapshot.design as GuidedProgram['design']) ?? undefined,
+    develop: (snapshot.develop as GuidedProgram['develop']) ?? undefined,
+    implement: (snapshot.implement as GuidedProgram['implement']) ?? undefined,
+    evaluate: (snapshot.evaluate as GuidedProgram['evaluate']) ?? undefined,
+    stageStatus: (snapshot.stageStatus as GuidedProgram['stageStatus']) ?? defaultStageStatus,
+  };
+}
+
+// ─── Django UUID lookup ───────────────────────────────────────────────────────
+// Resolves a local guided_* ID (or UUID passthrough) to a Django ELSProject UUID.
+
+async function resolveDjangoId(orgId: string, localId: string): Promise<string | null> {
+  if (isUUID(localId)) return localId;
+  if (guidedProjectIdCache.has(localId)) return guidedProjectIdCache.get(localId)!;
+
+  // Fallback: scan list looking for matching phases_data.local_id
+  try {
+    const { data } = await apiClient.get(`/organizations/${orgId}/els-projects/`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    for (const proj of results) {
+      const pd = (proj.phases_data as Record<string, unknown>) ?? {};
+      const snap = (pd.guided as Record<string, unknown>) ?? {};
+      const projLocalId = (snap.id as string) || (pd.local_id as string);
+      if (projLocalId === localId) {
+        const djangoId = proj.id as string;
+        guidedProjectIdCache.set(localId, djangoId);
+        return djangoId;
+      }
+    }
+  } catch {
+    // pass
+  }
+  return null;
+}
+
+// ─── Validation (unchanged from original — no Firebase dependency) ────────────
+
+const STAGE_ORDER: GuidedStage[] = ['ingest', 'analyze', 'design', 'develop', 'implement', 'evaluate'];
 
 function hasNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -111,47 +204,71 @@ export function validateGuidedProgramSchema(program: GuidedProgram): void {
   assertStagePrerequisites(program);
 }
 
-function normalizeGuidedProgram(data: Record<string, unknown>, id: string): GuidedProgram {
-  return {
-    ...data,
-    id,
-    createdAt: data.createdAt?.toDate?.() ?? new Date(),
-    updatedAt: data.updatedAt?.toDate?.() ?? new Date()
-  } as GuidedProgram;
-}
+// ─── Service functions ─────────────────────────────────────────────────────────
 
-export async function loadGuidedPrograms(orgId: string, userId: string) {
-  const q = query(
-    guidedCollection(orgId),
-    where('userId', '==', userId),
-    orderBy('updatedAt', 'desc')
-  );
-  const snapshot = await retryWithBackoff(() => getDocs(q), { retries: 2, shouldRetry: isTransientError });
-  const programs = snapshot.docs.map(docSnap => normalizeGuidedProgram(docSnap.data(), docSnap.id));
+export async function loadGuidedPrograms(orgId: string, userId: string): Promise<GuidedProgram[]> {
+  const { data } = await apiClient.get(`/organizations/${orgId}/els-projects/`);
+  const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+  const programs = results.map(mapELSProject);
   await logGuidedAction({
     orgId,
     actorId: userId,
     action: 'guided_programs_loaded',
     status: 'success',
     entityType: 'guided_program',
-    metadata: { count: programs.length }
+    metadata: { count: programs.length },
   });
   return programs;
 }
 
-export async function saveGuidedProgram(orgId: string, userId: string, program: GuidedProgram) {
+export async function saveGuidedProgram(
+  orgId: string,
+  userId: string,
+  program: GuidedProgram
+): Promise<void> {
   validateGuidedProgramSchema(program);
-  const ref = doc(guidedCollection(orgId), program.id);
-  await retryWithBackoff(
-    () => setDoc(ref, {
-      ...program,
-      orgId,
-      userId,
-      updatedAt: serverTimestamp(),
-      createdAt: program.createdAt ?? serverTimestamp()
-    }, { merge: true }),
-    { retries: 2, shouldRetry: isTransientError }
-  );
+
+  const djangoId = await resolveDjangoId(orgId, program.id);
+
+  const payload = {
+    name: program.name,
+    phases_data: {
+      local_id: program.id,
+      guided: {
+        id: program.id,
+        name: program.name,
+        sources: program.sources,
+        analysis: program.analysis ?? null,
+        design: program.design ?? null,
+        develop: program.develop ?? null,
+        implement: program.implement ?? null,
+        evaluate: program.evaluate ?? null,
+        stageStatus: program.stageStatus,
+      },
+    },
+  };
+
+  if (djangoId) {
+    await retryWithBackoff(
+      () => apiClient.patch(`/organizations/${orgId}/els-projects/${djangoId}/`, payload),
+      { retries: 2, shouldRetry: isTransientError }
+    );
+  } else {
+    const { data: res } = await retryWithBackoff(
+      () =>
+        apiClient.post(`/organizations/${orgId}/els-projects/`, {
+          ...payload,
+          organization: orgId,
+          status: 'active',
+        }),
+      { retries: 2, shouldRetry: isTransientError }
+    );
+    // Cache the new Django UUID so subsequent saves skip the list lookup
+    if ((res as Record<string, unknown>)?.id && program.id) {
+      guidedProjectIdCache.set(program.id, (res as Record<string, unknown>).id as string);
+    }
+  }
+
   await logGuidedAction({
     orgId,
     actorId: userId,
@@ -159,50 +276,53 @@ export async function saveGuidedProgram(orgId: string, userId: string, program: 
     status: 'success',
     entityType: 'guided_program',
     entityId: program.id,
-    metadata: { stageStatus: program.stageStatus }
+    metadata: { stageStatus: program.stageStatus },
   });
 }
 
-export async function addGuidedProgramVersion(orgId: string, program: GuidedProgram, stage: string) {
+export async function addGuidedProgramVersion(
+  orgId: string,
+  program: GuidedProgram,
+  stage: string
+): Promise<void> {
   validateGuidedProgramSchema(program);
-  const versionRef = collection(db, 'organizations', orgId, COLLECTION, program.id, 'versions');
+  const djangoId = await resolveDjangoId(orgId, program.id);
+  if (!djangoId) return; // No Django record yet — skip version
+
+  const outputData: Record<string, unknown> = {};
+  if (stage === 'ingest') outputData.sources = program.sources;
+  if (stage === 'analyze') outputData.analysis = program.analysis;
+  if (stage === 'design') outputData.design = program.design;
+  if (stage === 'develop') outputData.develop = program.develop;
+  if (stage === 'implement') outputData.implement = program.implement;
+  if (stage === 'evaluate') outputData.evaluate = program.evaluate;
+
   await retryWithBackoff(
-    () => addDoc(versionRef, {
-      programId: program.id,
-      stage,
-      snapshot: {
-        name: program.name,
-        sources: program.sources.map(source => ({ id: source.id, name: source.name })),
-        analysis: program.analysis,
-        design: program.design,
-        develop: program.develop,
-        implement: program.implement,
-        evaluate: program.evaluate
-      },
-      createdAt: serverTimestamp()
-    }),
+    () =>
+      apiClient.post(
+        `/organizations/${orgId}/els-projects/${djangoId}/phases/${stage}/complete/`,
+        { output_data: outputData }
+      ),
     { retries: 2, shouldRetry: isTransientError }
   );
+
   await logGuidedAction({
     orgId,
     action: 'guided_program_version_created',
     status: 'success',
     entityType: 'guided_program',
     entityId: program.id,
-    metadata: { stage }
+    metadata: { stage },
   });
 }
 
-export async function loadGuidedProgramVersions(orgId: string, programId: string) {
-  const versionRef = collection(db, 'organizations', orgId, COLLECTION, programId, 'versions');
-  const q = query(versionRef, orderBy('createdAt', 'desc'));
-  const snapshot = await retryWithBackoff(() => getDocs(q), { retries: 2, shouldRetry: isTransientError });
-  return snapshot.docs.map(docSnap => ({
-    id: docSnap.id,
-    snapshot: docSnap.data().snapshot,
-    ...docSnap.data(),
-    createdAt: docSnap.data().createdAt?.toDate?.() ?? new Date()
-  }));
+export async function loadGuidedProgramVersions(
+  _orgId: string,
+  _programId: string
+): Promise<[]> {
+  // Phase records are embedded in the ELSProject detail response.
+  // Use loadGuidedPrograms + filter by program id for now.
+  return [];
 }
 
 export async function addGuidedSource(
@@ -210,18 +330,21 @@ export async function addGuidedSource(
   userId: string,
   programId: string,
   source: FileUpload
-) {
-  const ref = doc(guidedCollection(orgId), programId);
-  const snap = await retryWithBackoff(() => getDoc(ref), { retries: 2, shouldRetry: isTransientError });
-  if (!snap.exists()) throw new Error('Guided program not found.');
-  const program = normalizeGuidedProgram(snap.data(), snap.id);
+): Promise<GuidedProgram> {
+  const djangoId = await resolveDjangoId(orgId, programId);
+  if (!djangoId) throw new Error('Guided program not found.');
+
+  const { data } = await apiClient.get(`/organizations/${orgId}/els-projects/${djangoId}/`);
+  const program = mapELSProject(data as Record<string, unknown>);
+
   const next: GuidedProgram = {
     ...program,
     sources: [...(program.sources ?? []), source],
-    stageStatus: { ...program.stageStatus, ingest: 'completed' }
+    stageStatus: { ...program.stageStatus, ingest: 'completed' },
   };
   validateGuidedProgramSchema(next);
   await saveGuidedProgram(orgId, userId, next);
+
   await logGuidedIngestion({
     orgId,
     actorId: userId,
@@ -231,7 +354,7 @@ export async function addGuidedSource(
     sourceName: source.name,
     sourceType: source.type,
     size: source.size,
-    metadata: { programId }
+    metadata: { programId },
   });
   return next;
 }
@@ -241,24 +364,26 @@ export async function saveGuidedAnalysis(
   userId: string,
   programId: string,
   analysis: NonNullable<GuidedProgram['analysis']>
-) {
-  const ref = doc(guidedCollection(orgId), programId);
+): Promise<void> {
+  const djangoId = await resolveDjangoId(orgId, programId);
+  if (!djangoId) throw new Error('Guided program not found.');
+
   await retryWithBackoff(
-    () => updateDoc(ref, {
-      analysis,
-      'stageStatus.analyze': 'completed',
-      updatedAt: serverTimestamp(),
-      lastModifiedBy: userId
-    }),
+    () =>
+      apiClient.post(
+        `/organizations/${orgId}/els-projects/${djangoId}/phases/analyze/complete/`,
+        { output_data: { analysis } }
+      ),
     { retries: 2, shouldRetry: isTransientError }
   );
+
   await logGuidedAction({
     orgId,
     actorId: userId,
     action: 'guided_analysis_saved',
     status: 'success',
     entityType: 'guided_program',
-    entityId: programId
+    entityId: programId,
   });
 }
 
@@ -267,19 +392,22 @@ export async function saveGuidedDraft(
   userId: string,
   programId: string,
   develop: NonNullable<GuidedProgram['develop']>
-) {
+): Promise<void> {
   if (!hasNonEmptyString(develop.draftId)) {
     throw new Error('Validation failed: Draft ID is required.');
   }
-  const ref = doc(guidedCollection(orgId), programId);
+  const djangoId = await resolveDjangoId(orgId, programId);
+  if (!djangoId) throw new Error('Guided program not found.');
+
   await retryWithBackoff(
-    () => updateDoc(ref, {
-      develop,
-      updatedAt: serverTimestamp(),
-      lastModifiedBy: userId
-    }),
+    () =>
+      apiClient.post(
+        `/organizations/${orgId}/els-projects/${djangoId}/phases/develop/complete/`,
+        { output_data: { develop } }
+      ),
     { retries: 2, shouldRetry: isTransientError }
   );
+
   await logGuidedAction({
     orgId,
     actorId: userId,
@@ -287,7 +415,7 @@ export async function saveGuidedDraft(
     status: 'success',
     entityType: 'guided_program',
     entityId: programId,
-    metadata: { draftId: develop.draftId, lessonCount: develop.lessonCount }
+    metadata: { draftId: develop.draftId, lessonCount: develop.lessonCount },
   });
 }
 
@@ -296,19 +424,22 @@ export async function saveGuidedEnrollmentPlan(
   userId: string,
   programId: string,
   implement: NonNullable<GuidedProgram['implement']>
-) {
+): Promise<void> {
   if (!isNonNegativeInteger(implement.enrollmentCount)) {
     throw new Error('Validation failed: Enrollment count must be a non-negative integer.');
   }
-  const ref = doc(guidedCollection(orgId), programId);
+  const djangoId = await resolveDjangoId(orgId, programId);
+  if (!djangoId) throw new Error('Guided program not found.');
+
   await retryWithBackoff(
-    () => updateDoc(ref, {
-      implement,
-      updatedAt: serverTimestamp(),
-      lastModifiedBy: userId
-    }),
+    () =>
+      apiClient.post(
+        `/organizations/${orgId}/els-projects/${djangoId}/phases/implement/complete/`,
+        { output_data: { implement } }
+      ),
     { retries: 2, shouldRetry: isTransientError }
   );
+
   await logGuidedAction({
     orgId,
     actorId: userId,
@@ -316,7 +447,7 @@ export async function saveGuidedEnrollmentPlan(
     status: 'success',
     entityType: 'guided_program',
     entityId: programId,
-    metadata: { enrollmentCount: implement.enrollmentCount, cohorts: implement.cohorts }
+    metadata: { enrollmentCount: implement.enrollmentCount, cohorts: implement.cohorts },
   });
 }
 
@@ -325,16 +456,19 @@ export async function saveGuidedReport(
   userId: string,
   programId: string,
   evaluate: NonNullable<GuidedProgram['evaluate']>
-) {
-  const ref = doc(guidedCollection(orgId), programId);
+): Promise<void> {
+  const djangoId = await resolveDjangoId(orgId, programId);
+  if (!djangoId) throw new Error('Guided program not found.');
+
   await retryWithBackoff(
-    () => updateDoc(ref, {
-      evaluate,
-      updatedAt: serverTimestamp(),
-      lastModifiedBy: userId
-    }),
+    () =>
+      apiClient.post(
+        `/organizations/${orgId}/els-projects/${djangoId}/phases/evaluate/complete/`,
+        { output_data: { evaluate } }
+      ),
     { retries: 2, shouldRetry: isTransientError }
   );
+
   await logGuidedAction({
     orgId,
     actorId: userId,
@@ -342,10 +476,13 @@ export async function saveGuidedReport(
     status: 'success',
     entityType: 'guided_program',
     entityId: programId,
-    metadata: { complianceScore: evaluate.complianceScore, metricsCount: evaluate.metrics?.length ?? 0 }
+    metadata: {
+      complianceScore: evaluate.complianceScore,
+      metricsCount: evaluate.metrics?.length ?? 0,
+    },
   });
 }
 
-export function toGuidedUserError(error: unknown) {
+export function toGuidedUserError(error: unknown): string {
   return toUserErrorMessage(error, 'Unable to save guided workflow changes. Please try again.');
 }

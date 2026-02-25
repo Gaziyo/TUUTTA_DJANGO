@@ -12,6 +12,13 @@ class Assessment(models.Model):
         ('assignment', 'Assignment'),
     ]
 
+    SUBTYPES = [
+        ('diagnostic', 'Diagnostic'),
+        ('formative', 'Formative'),
+        ('summative', 'Summative'),
+        ('remediation', 'Remediation'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     course = models.ForeignKey('courses.Course', on_delete=models.SET_NULL, null=True, blank=True)
@@ -21,7 +28,11 @@ class Assessment(models.Model):
     instructions = models.TextField(blank=True)
 
     assessment_type = models.CharField(max_length=20, choices=TYPES)
+    assessment_subtype = models.CharField(max_length=20, choices=SUBTYPES, blank=True)
     difficulty = models.CharField(max_length=20, blank=True)
+
+    # Bloom's Taxonomy level (1=Remember … 6=Create)
+    bloom_level = models.IntegerField(null=True, blank=True)
 
     time_limit = models.IntegerField(null=True, blank=True)  # minutes
     passing_score = models.DecimalField(max_digits=5, decimal_places=2, default=70)
@@ -57,6 +68,15 @@ class Question(models.Model):
         ('drag_drop', 'Drag and Drop'),
     ]
 
+    MODALITIES = [
+        ('reading', 'Reading'),
+        ('writing', 'Writing'),
+        ('listening', 'Listening'),
+        ('speaking', 'Speaking'),
+        ('math', 'Math'),
+        ('general_knowledge', 'General Knowledge'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE, related_name='questions')
 
@@ -70,6 +90,18 @@ class Question(models.Model):
 
     media_url = models.URLField(blank=True)
     is_required = models.BooleanField(default=True)
+
+    # Cognitive OS extensions
+    bloom_level = models.IntegerField(null=True, blank=True)          # 1=Remember … 6=Create
+    modality = models.CharField(max_length=20, choices=MODALITIES, blank=True)
+    difficulty_score = models.FloatField(null=True, blank=True)       # 0.0–1.0 IRT-derived
+    knowledge_chunk = models.ForeignKey(
+        'knowledge.KnowledgeChunk',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='questions',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

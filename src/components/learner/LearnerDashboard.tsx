@@ -13,9 +13,14 @@ import {
   Calendar,
   BarChart2,
   Trophy,
+  Brain,
+  AlertTriangle,
+  Activity,
+  Gauge
 } from 'lucide-react';
-import { collection, getDocs, query, where, orderBy, limit, setDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import cognitiveProfileService from '../../services/cognitiveProfileService';
+import gapMatrixService from '../../services/gapMatrixService';
+import adaptiveRecommendationService from '../../services/adaptiveRecommendationService';
 
 type TabType = 'all' | 'in_progress' | 'completed' | 'overdue';
 
@@ -57,6 +62,9 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [recommendations, setRecommendations] = useState<AnalyticsRecommendation[]>([]);
+  const [cognitiveProfile, setCognitiveProfile] = useState<any>(null);
+  const [gapEntries, setGapEntries] = useState<any[]>([]);
+  const [failureRisks, setFailureRisks] = useState<any[]>([]);
 
   useEffect(() => {
     if (currentOrg?.id) {
@@ -68,18 +76,23 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
   useEffect(() => {
     const loadRecommendations = async () => {
       if (!currentOrg?.id || !user?.id) return;
-      const snap = await getDocs(query(
-        collection(db, 'analyticsRecommendations'),
-        where('orgId', '==', currentOrg.id),
-        where('userId', '==', user.id),
-        orderBy('createdAt', 'desc'),
-        limit(10)
-      ));
-      setRecommendations(
-        snap.docs.map(docRef => ({ ...(docRef.data() as AnalyticsRecommendation), id: docRef.id }))
-      );
+      // Analytics recommendations — Django endpoint pending; use empty list for now
+      setRecommendations([]);
     };
     void loadRecommendations();
+  }, [currentOrg?.id, user?.id]);
+
+  useEffect(() => {
+    const loadCognitive = async () => {
+      if (!currentOrg?.id || !user?.id) return;
+      const profile = await cognitiveProfileService.getForCurrentUser(currentOrg.id);
+      setCognitiveProfile(profile);
+      const gaps = await gapMatrixService.listForUser(currentOrg.id, user.id);
+      setGapEntries(gaps);
+      const risks = await adaptiveRecommendationService.listFailureRisks(currentOrg.id);
+      setFailureRisks(risks);
+    };
+    void loadCognitive();
   }, [currentOrg?.id, user?.id]);
 
   // Get user's enrollments
@@ -120,6 +133,21 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
 
     return { total, completed, inProgress, overdue, avgProgress, avgScore, totalTime: Math.round(totalTime) };
   }, [myEnrollments, courseMap]);
+
+  const dominantBloom = cognitiveProfile ? cognitiveProfileService.getDominantBloomLevel(cognitiveProfile) : null;
+  const dominantModality = cognitiveProfile ? cognitiveProfileService.getDominantModality(cognitiveProfile) : null;
+  const engagementIndex = cognitiveProfile
+    ? Math.min(100, Math.round((cognitiveProfile.totalQuestionsAnswered || 0) / 5))
+    : 0;
+
+  const topGaps = useMemo(() => {
+    return [...gapEntries].sort((a, b) => (b.gapScore ?? 0) - (a.gapScore ?? 0)).slice(0, 5);
+  }, [gapEntries]);
+
+  const highRisk = useMemo(() => {
+    const sorted = [...failureRisks].sort((a, b) => (b.risk_score ?? 0) - (a.risk_score ?? 0));
+    return sorted[0] || null;
+  }, [failureRisks]);
 
   // Filter enrollments
   const filteredEnrollments = useMemo(() => {
@@ -184,18 +212,7 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
 
   const handleRecommendationAction = async (rec: AnalyticsRecommendation, status: 'followed' | 'ignored') => {
     if (!currentOrg?.id || !user?.id || !rec.id) return;
-    await setDoc(doc(collection(db, 'recommendationFeedback')), {
-      orgId: currentOrg.id,
-      userId: user.id,
-      recommendationId: rec.id,
-      status,
-      createdAt: Date.now()
-    });
-    await updateDoc(doc(db, 'analyticsRecommendations', rec.id), {
-      status,
-      respondedAt: Date.now(),
-      updatedAt: Date.now()
-    });
+    // Feedback persistence — Django endpoint pending; update local state only
     setRecommendations(prev => prev.map(item => (item.id === rec.id ? { ...item, status } : item)));
   };
 
@@ -267,6 +284,91 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
             </div>
           </div>
         )}
+
+      <div className="p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          <div className={`p-4 rounded-xl border ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Brain className="w-4 h-4 text-indigo-500" />
+              <h2 className="text-sm font-semibold">Cognitive Profile</h2>
+            </div>
+            <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Dominant Bloom: {dominantBloom ? `L${dominantBloom}` : '—'}
+            </p>
+            <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Strongest modality: {dominantModality ?? '—'}
+            </p>
+            <div className="mt-3">
+              <div className="flex justify-between text-xs mb-1">
+                <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Engagement index</span>
+                <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{engagementIndex}%</span>
+              </div>
+              <progress
+                className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-indigo`}
+                value={engagementIndex}
+                max={100}
+                aria-label="Engagement index"
+              />
+            </div>
+            <p className={`text-xs mt-3 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+              Avg response time: {cognitiveProfile?.avgResponseTimeMs ? `${Math.round(cognitiveProfile.avgResponseTimeMs)}ms` : '—'}
+            </p>
+          </div>
+
+          <div className={`p-4 rounded-xl border ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Activity className="w-4 h-4 text-emerald-500" />
+              <h2 className="text-sm font-semibold">Competency Matrix</h2>
+            </div>
+            {topGaps.length === 0 ? (
+              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                No active gaps detected.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {topGaps.map((gap) => (
+                  <div key={gap.id} className="flex items-center justify-between text-xs">
+                    <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>
+                      {gap.competencyName || 'Competency'}
+                    </span>
+                    <span className={isDarkMode ? 'text-amber-400' : 'text-amber-600'}>
+                      Gap {Math.round((gap.gapScore ?? 0) * 100)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={`p-4 rounded-xl border ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-rose-500" />
+              <h2 className="text-sm font-semibold">Predictive Panel</h2>
+            </div>
+            {highRisk ? (
+              <>
+                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Risk level: <span className="font-semibold">{highRisk.risk_level}</span>
+                </p>
+                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Risk score: {Math.round((highRisk.risk_score ?? 0) * 100)}%
+                </p>
+                <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                  Reasons: {highRisk.reasons?.join(', ') || 'No details'}
+                </p>
+              </>
+            ) : (
+              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                No high-risk alerts.
+              </p>
+            )}
+            <div className="mt-3 flex items-center gap-2 text-xs">
+              <Gauge className="w-3 h-3 text-indigo-500" />
+              Estimated mastery: {highRisk ? `${Math.max(1, Math.round((1 - (highRisk.risk_score ?? 0)) * 4))} weeks` : '—'}
+            </div>
+          </div>
+        </div>
+      </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-5 gap-4">
@@ -344,6 +446,8 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
                   placeholder="Search courses..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  aria-label="Search courses"
+                  title="Search courses"
                   className={`px-4 py-2 rounded-lg border text-sm ${
                     isDarkMode
                       ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500'
@@ -480,12 +584,12 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
                         {stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%
                       </span>
                     </div>
-                    <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                      <div
-                        className="h-full rounded-full bg-green-500"
-                        style={{ width: `${stats.total > 0 ? (stats.completed / stats.total) * 100 : 0}%` }}
-                      />
-                    </div>
+                    <progress
+                      className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-green`}
+                      value={stats.total > 0 ? (stats.completed / stats.total) * 100 : 0}
+                      max={100}
+                      aria-label="Completion rate"
+                    />
                   </div>
 
                   <div>
@@ -493,12 +597,12 @@ export const LearnerDashboard: React.FC<LearnerDashboardProps> = ({
                       <span>Average Progress</span>
                       <span className="font-medium">{stats.avgProgress}%</span>
                     </div>
-                    <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                      <div
-                        className="h-full rounded-full bg-indigo-500"
-                        style={{ width: `${stats.avgProgress}%` }}
-                      />
-                    </div>
+                    <progress
+                      className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-indigo`}
+                      value={stats.avgProgress}
+                      max={100}
+                      aria-label="Average progress"
+                    />
                   </div>
                 </div>
               </div>
@@ -628,16 +732,18 @@ const CourseCard: React.FC<CourseCardProps> = ({
                  daysLeft !== null ? `${daysLeft} days left` : ''}
               </span>
             </div>
-            <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-              <div
-                className={`h-full rounded-full transition-all ${
-                  enrollment.status === 'completed' ? 'bg-green-500' :
-                  isOverdue ? 'bg-orange-500' :
-                  'bg-indigo-500'
-                }`}
-                style={{ width: `${Math.min(enrollment.progress, 100)}%` }}
-              />
-            </div>
+            <progress
+              className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} ${
+                enrollment.status === 'completed'
+                  ? 'progress-fill-green'
+                  : isOverdue
+                    ? 'progress-fill-orange'
+                    : 'progress-fill-indigo'
+              }`}
+              value={Math.min(enrollment.progress, 100)}
+              max={100}
+              aria-label={`${course.name} progress`}
+            />
             <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
               {enrollment.progress}% complete
             </p>

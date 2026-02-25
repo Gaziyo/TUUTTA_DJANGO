@@ -17,7 +17,6 @@ import type {
 import {
   assessmentService as canonical,
 } from './canonical';
-import * as lmsService from '../lib/lmsService';
 import { serviceEvents } from './events';
 
 /**
@@ -194,51 +193,16 @@ export const assessmentService = {
     }
   },
 
-  // ─── LEGACY COMPATIBILITY ────────────────────────────────────────────────────
-
   /**
-   * Legacy: Create assessment result directly.
-   */
-  createResult: async (
-    result: Omit<LegacyAssessmentResult, 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<LegacyAssessmentResult> => {
-    const created = await lmsService.createAssessmentResult(result);
-    serviceEvents.emit('assessment.created', {
-      assessmentId: created.id,
-      enrollmentId: created.enrollmentId,
-      score: created.score,
-      passed: created.passed,
-    });
-    return created;
-  },
-
-  /**
-   * Legacy: Update assessment result.
-   */
-  updateResult: async (
-    resultId: string,
-    updates: Partial<LegacyAssessmentResult>
-  ): Promise<void> => {
-    await lmsService.updateAssessmentResult(resultId, updates);
-    serviceEvents.emit('assessment.updated', { assessmentId: resultId });
-  },
-
-  /**
-   * Legacy: List results for an enrollment.
-   */
-  listForEnrollment: (orgId: string, enrollmentId: string) =>
-    lmsService.getAssessmentResultsByEnrollment(orgId, enrollmentId),
-
-  /**
-   * Legacy: List results for an organization.
+   * List results for an organization.
    */
   listForOrg: async (orgId: string, limitCount = 200): Promise<LegacyAssessmentResult[]> => {
     try {
       const results = await canonical.getResultsForOrg(orgId, limitCount);
       return results.map(toLegacyResult);
     } catch (error) {
-      console.warn('[assessmentService] Falling back to legacy for listForOrg:', error);
-      return lmsService.getAssessmentResultsByOrg(orgId, limitCount);
+      console.warn('[assessmentService] Error in listForOrg:', error);
+      return [];
     }
   },
 };

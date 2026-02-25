@@ -226,6 +226,7 @@ export const CourseManagement: React.FC<CourseManagementProps> = () => {
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as CourseStatus)}
+                  aria-label="Filter by status"
                   className={`px-3 py-2 rounded-lg border ${
                     isDarkMode
                       ? 'bg-gray-800 border-gray-700 text-white'
@@ -368,6 +369,7 @@ const CourseCard: React.FC<CourseCardProps> = ({
             <div className="relative">
               <button
                 onClick={() => setShowMenu(!showMenu)}
+                aria-label="Course actions menu"
                 className={`p-2 rounded-lg ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
               >
                 <MoreVertical className="w-5 h-5" />
@@ -778,6 +780,7 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                   <select
                     value={difficulty}
                     onChange={(e) => setDifficulty(e.target.value as Course['difficulty'])}
+                    aria-label="Difficulty"
                     className={`w-full px-4 py-2 rounded-lg border ${
                       isDarkMode
                         ? 'bg-gray-700 border-gray-600 text-white'
@@ -799,6 +802,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                     value={estimatedDuration}
                     onChange={(e) => setEstimatedDuration(parseInt(e.target.value) || 0)}
                     min={0}
+                    aria-label="Duration (minutes)"
+                    placeholder="0"
                     className={`w-full px-4 py-2 rounded-lg border ${
                       isDarkMode
                         ? 'bg-gray-700 border-gray-600 text-white'
@@ -842,7 +847,7 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                       }`}
                     >
                       {tag}
-                      <button onClick={() => removeTag(tag)} className="hover:text-red-500">
+                      <button onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`} className="hover:text-red-500">
                         <X className="w-3 h-3" />
                       </button>
                     </span>
@@ -953,6 +958,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                         value={module.title}
                         onChange={(e) => updateModule(module.id, { title: e.target.value })}
                         onClick={(e) => e.stopPropagation()}
+                        aria-label="Module title"
+                        placeholder="Module title"
                         className={`flex-1 px-2 py-1 rounded border ${
                           isDarkMode
                             ? 'bg-gray-700 border-gray-600 text-white'
@@ -966,6 +973,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                         <button
                           onClick={(e) => { e.stopPropagation(); moveModule(module.id, 'up'); }}
                           disabled={moduleIndex === 0}
+                          aria-label="Move module up"
+                          title="Move module up"
                           className={`p-1 rounded ${
                             moduleIndex === 0
                               ? 'opacity-40 cursor-not-allowed'
@@ -977,6 +986,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                         <button
                           onClick={(e) => { e.stopPropagation(); moveModule(module.id, 'down'); }}
                           disabled={moduleIndex === modules.length - 1}
+                          aria-label="Move module down"
+                          title="Move module down"
                           className={`p-1 rounded ${
                             moduleIndex === modules.length - 1
                               ? 'opacity-40 cursor-not-allowed'
@@ -988,6 +999,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                       </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); deleteModule(module.id); }}
+                        aria-label="Delete module"
+                        title="Delete module"
                         className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1035,6 +1048,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                     <button
                                       onClick={() => moveLesson(module.id, lesson.id, 'up')}
                                       disabled={lessonIndex === 0}
+                                      aria-label="Move lesson up"
+                                      title="Move lesson up"
                                       className={`p-1 rounded ${
                                         lessonIndex === 0
                                           ? 'opacity-40 cursor-not-allowed'
@@ -1046,6 +1061,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                     <button
                                       onClick={() => moveLesson(module.id, lesson.id, 'down')}
                                       disabled={lessonIndex === module.lessons.length - 1}
+                                      aria-label="Move lesson down"
+                                      title="Move lesson down"
                                       className={`p-1 rounded ${
                                         lessonIndex === module.lessons.length - 1
                                           ? 'opacity-40 cursor-not-allowed'
@@ -1059,6 +1076,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                     type="text"
                                     value={lesson.title}
                                     onChange={(e) => updateLesson(module.id, lesson.id, { title: e.target.value })}
+                                    aria-label="Lesson title"
+                                    placeholder="Lesson title"
                                     className={`flex-1 px-2 py-1 rounded border text-sm ${
                                       isDarkMode
                                         ? 'bg-gray-600 border-gray-500 text-white'
@@ -1068,6 +1087,7 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                   <select
                                     value={lesson.type}
                                     onChange={(e) => updateLesson(module.id, lesson.id, { type: e.target.value as LessonType })}
+                                    aria-label="Lesson type"
                                     className={`px-2 py-1 rounded border text-sm ${
                                       isDarkMode
                                         ? 'bg-gray-600 border-gray-500 text-white'
@@ -1087,6 +1107,7 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                     type="number"
                                     value={lesson.duration}
                                     onChange={(e) => updateLesson(module.id, lesson.id, { duration: parseInt(e.target.value) || 0 })}
+                                    aria-label="Lesson duration (minutes)"
                                     className={`w-16 px-2 py-1 rounded border text-sm ${
                                       isDarkMode
                                         ? 'bg-gray-600 border-gray-500 text-white'
@@ -1105,6 +1126,7 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                   </label>
                                   <button
                                     onClick={() => setEditingLesson({ moduleId: module.id, lessonId: lesson.id })}
+                                    aria-label="Edit lesson"
                                     className={`p-1 rounded ${
                                       isDarkMode ? 'text-indigo-300 hover:bg-gray-600' : 'text-indigo-600 hover:bg-gray-200'
                                     }`}
@@ -1114,6 +1136,8 @@ const CourseEditor: React.FC<CourseEditorProps> = ({
                                   </button>
                                   <button
                                     onClick={() => deleteLesson(module.id, lesson.id)}
+                                    aria-label="Delete lesson"
+                                    title="Delete lesson"
                                     className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
                                   >
                                     <Trash2 className="w-4 h-4" />

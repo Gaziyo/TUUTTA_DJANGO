@@ -88,6 +88,12 @@ const GenieCompliance = lazy(() => import('./components/admin/GenieCompliance'))
 const GenieNotifications = lazy(() => import('./components/admin/GenieNotifications'));
 const ELSStudio = lazy(() => import('./components/admin/ELSStudio'));
 const GenieGuidedLayout = lazy(() => import('./components/admin/genie/GenieGuidedLayout'));
+const AdminCompetencies = lazy(() => import('./components/admin/AdminCompetencies'));
+const AdminGapEngine = lazy(() => import('./components/admin/AdminGapEngine'));
+const AdminDigitalTwins = lazy(() => import('./components/admin/AdminDigitalTwins'));
+const AdminPredictions = lazy(() => import('./components/admin/AdminPredictions'));
+const AdminForecasting = lazy(() => import('./components/admin/AdminForecasting'));
+const AdminGovernance = lazy(() => import('./components/admin/AdminGovernance'));
 const GenieGuidedWorkspace = lazy(() => import('./components/admin/genie/ProgramWorkspace'));
 const GenieGuidedPreview = lazy(() => import('./components/admin/genie/PreviewPage'));
 const GenieGuidedImpact = lazy(() => import('./components/admin/genie/ImpactPage'));
@@ -1669,6 +1675,12 @@ function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
           <Route path="/admin/genie/manager-portal" element={<Navigate to="/admin/genie-guided?surface=manager-portal-internal" replace />} />
           <Route path="/admin/genie/governance" element={<Navigate to="/admin/genie-guided?surface=governance-internal" replace />} />
           <Route path="/admin/genie/*" element={<Navigate to="/admin/genie" replace />} />
+          <Route path="/admin/competencies" element={<AdminCompetencies isDarkMode={isDarkMode} />} />
+          <Route path="/admin/gap-engine" element={<AdminGapEngine isDarkMode={isDarkMode} />} />
+          <Route path="/admin/digital-twins" element={<AdminDigitalTwins isDarkMode={isDarkMode} />} />
+          <Route path="/admin/predictions" element={<AdminPredictions isDarkMode={isDarkMode} />} />
+          <Route path="/admin/forecasting" element={<AdminForecasting isDarkMode={isDarkMode} />} />
+          <Route path="/admin/governance" element={<AdminGovernance isDarkMode={isDarkMode} />} />
           <Route path="/admin/enrollments" element={<EnrollmentManagement />} />
           <Route path="/admin/assignments" element={<AssignmentRules />} />
           <Route

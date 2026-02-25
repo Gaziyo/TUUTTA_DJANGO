@@ -9,13 +9,11 @@
  *   /progress/{userId}_{courseId}/events/{eventId} — Event subcollection
  */
 
-import type { LessonProgressRecord } from '../types/lms';
 import type { ProgressSummary, ProgressEvent } from '../types/schema';
 import {
   progressService as canonical,
   courseService as canonicalCourse,
 } from './canonical';
-import * as lmsService from '../lib/lmsService';
 import { serviceEvents } from './events';
 
 /**
@@ -190,44 +188,6 @@ export const progressService = {
     }
   },
 
-  // ─── LEGACY COMPATIBILITY ────────────────────────────────────────────────────
-  // These methods maintain compatibility with existing components
-
-  /**
-   * Legacy: Upsert lesson progress record.
-   * Maps to canonical progress tracking.
-   */
-  upsert: async (
-    record: Omit<LessonProgressRecord, 'id'> & { id?: string }
-  ): Promise<LessonProgressRecord> => {
-    // Use legacy service for direct upserts during migration
-    const saved = await lmsService.upsertLessonProgress(record);
-    serviceEvents.emit('progress.upserted', {
-      enrollmentId: saved.enrollmentId,
-      lessonId: saved.lessonId,
-    });
-    return saved;
-  },
-
-  /**
-   * Legacy: Upsert module completion record.
-   */
-  upsertModuleCompletion: async (record: {
-    orgId: string;
-    enrollmentId: string;
-    userId: string;
-    userAuthId?: string;
-    courseId: string;
-    moduleId: string;
-    status: 'completed';
-    completedAt: number;
-  }): Promise<void> => {
-    serviceEvents.emit('module.completed', {
-      enrollmentId: record.enrollmentId,
-      moduleId: record.moduleId,
-    });
-    await lmsService.upsertModuleProgress(record);
-  },
 };
 
 export default progressService;

@@ -24,10 +24,10 @@ import { useLMSStore } from '../../store/lmsStore';
 import { pipelineService } from '../../services';
 import type { GeniePipelineProject } from '../../types/lms';
 import { Switch } from '../ui/switch';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../lib/firebase';
+import { apiClient } from '../../lib/api';
 import { transcribeAudio } from '../../lib/voice';
 import { SpeechSynthesizer } from '../../lib/speech';
+import { getProgressClass } from '../../lib/progress';
 
 // Stage icon mapping
 const STAGE_ICONS: Record<PipelineStage, React.ReactNode> = {
@@ -69,6 +69,8 @@ function PipelineStepIndicator({ isDarkMode }: { isDarkMode: boolean }) {
                 <button
                   onClick={() => isAccessible && setStage(stage.id)}
                   disabled={!isAccessible}
+                  aria-label={`Go to ${stage.label ?? stage.shortLabel} stage`}
+                  title={`Go to ${stage.label ?? stage.shortLabel} stage`}
                   className={`flex flex-col items-center gap-2 px-3 py-2 rounded-xl transition-all ${
                     isActive
                       ? isDarkMode
@@ -169,6 +171,15 @@ function ProjectCreationModal({
   onClose: () => void;
   onSubmit: (name: string, description: string) => void;
 }) {
+  const getWidthClass = (value: number) => {
+    if (value < 300) return 'w-[280px]';
+    if (value < 340) return 'w-[320px]';
+    if (value < 380) return 'w-[360px]';
+    if (value < 420) return 'w-[400px]';
+    if (value < 460) return 'w-[440px]';
+    if (value < 500) return 'w-[480px]';
+    return 'w-[520px]';
+  };
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
 
@@ -207,6 +218,8 @@ function ProjectCreationModal({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close new project modal"
+            title="Close"
             className={`p-2 rounded-lg transition-colors ${
               isDarkMode ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-100 text-gray-500'
             }`}
@@ -218,6 +231,7 @@ function ProjectCreationModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
+              htmlFor="genie-project-name"
               className={`block text-xs font-semibold uppercase tracking-wide mb-1 ${
                 isDarkMode ? 'text-gray-400' : 'text-gray-500'
               }`}
@@ -225,10 +239,12 @@ function ProjectCreationModal({
               Project Name
             </label>
             <input
+              id="genie-project-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., Workplace Safety Compliance Training"
+              aria-label="Project name"
               className={`w-full px-4 py-3 rounded-xl border text-sm ${
                 isDarkMode
                   ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500'
@@ -240,6 +256,7 @@ function ProjectCreationModal({
 
           <div>
             <label
+              htmlFor="genie-project-description"
               className={`block text-xs font-semibold uppercase tracking-wide mb-1 ${
                 isDarkMode ? 'text-gray-400' : 'text-gray-500'
               }`}
@@ -247,10 +264,12 @@ function ProjectCreationModal({
               Description (Optional)
             </label>
             <textarea
+              id="genie-project-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Brief overview of the learning objectives..."
               rows={3}
+              aria-label="Project description"
               className={`w-full px-4 py-3 rounded-xl border text-sm resize-none ${
                 isDarkMode
                   ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500'
@@ -521,10 +540,9 @@ function CopilotPanel({
 
   return (
     <aside
-      className={`transition-all ${
-        open ? 'w-80' : 'w-12'
-      } absolute right-4 top-4 bottom-4 z-20`}
-      style={open ? { width } : undefined}
+      className={`transition-all absolute right-4 top-4 bottom-4 z-20 ${
+        open ? getWidthClass(width) : 'w-12'
+      }`}
     >
       <div className={`h-full flex flex-col rounded-2xl shadow-2xl border ${
         isDarkMode ? 'border-indigo-500/30' : 'border-indigo-200'
@@ -564,8 +582,8 @@ function CopilotPanel({
                 <p className="text-xs font-semibold">AI confidence</p>
                 <span className="text-xs font-semibold">{confidence}%</span>
               </div>
-              <div className={`mt-2 h-2 rounded ${isDarkMode ? 'bg-indigo-900/50' : 'bg-indigo-100'}`}>
-                <div className="h-2 rounded bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500" style={{ width: `${confidence}%` }} />
+              <div className="mt-2 progress-container">
+                <div className={`progress-bar progress-bar-indigo ${getProgressClass(confidence)}`} />
               </div>
               <p className="text-[11px] text-muted-foreground mt-2">Based on available sources and org data.</p>
             </div>
@@ -653,6 +671,7 @@ function CopilotPanel({
                     onChange={(e) => setPromptInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && addPrompt()}
                     placeholder="Add a prompt for this stage..."
+                    aria-label="Add a copilot prompt"
                     className={`flex-1 px-2.5 py-2 rounded-lg text-xs border ${
                       isDarkMode ? 'bg-gray-900 border-gray-700 text-gray-200' : 'bg-white border-gray-200 text-gray-700'
                     }`}
@@ -675,6 +694,8 @@ function CopilotPanel({
                       {prompt}
                       <button
                         onClick={() => removePrompt(index)}
+                        aria-label="Remove prompt"
+                        title="Remove prompt"
                         className="text-[10px] opacity-70 hover:opacity-100"
                       >
                         ×
@@ -743,12 +764,14 @@ function CopilotPanel({
                     }
                   }}
                   placeholder="Ask the co‑pilot..."
+                  aria-label="Copilot chat input"
                   className={`flex-1 px-2.5 py-2 rounded-lg text-xs border ${
                     isDarkMode ? 'bg-gray-900 border-gray-700 text-gray-200' : 'bg-white border-gray-200 text-gray-700'
                   }`}
                 />
                 <button
                   onClick={isRecording ? stopRecording : startRecording}
+                  aria-label={isRecording ? 'Stop recording' : 'Start recording'}
                   className={`px-2.5 py-2 rounded-lg text-xs font-medium ${
                     isRecording
                       ? 'bg-red-500 text-white hover:bg-red-600'
@@ -806,10 +829,11 @@ function CopilotPanel({
                     <span>Progress</span>
                     <span>{autopilotProgress.current}/{autopilotProgress.total}</span>
                   </div>
-                  <div className={`mt-1 h-1.5 rounded ${isDarkMode ? 'bg-indigo-900/50' : 'bg-indigo-100'}`}>
+                  <div className="mt-1 progress-container">
                     <div
-                      className="h-1.5 rounded bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500"
-                      style={{ width: `${Math.min(100, Math.round((autopilotProgress.current / Math.max(1, autopilotProgress.total)) * 100))}%` }}
+                      className={`progress-bar progress-bar-indigo ${getProgressClass(
+                        Math.min(100, Math.round((autopilotProgress.current / Math.max(1, autopilotProgress.total)) * 100))
+                      )}`}
                     />
                   </div>
                 </div>
@@ -1063,7 +1087,6 @@ function GeniePipelineContent({ isDarkMode }: GeniePipelineProps) {
   } = useLMSStore();
   const [copilotOpen, setCopilotOpen] = useState(true);
   const [copilotWidth, setCopilotWidth] = useState(360);
-  const chatCompletion = httpsCallable(functions, 'genieChatCompletion');
   const isResizingRef = React.useRef(false);
   const suggestionRef = React.useRef(new Set<string>());
 
@@ -1152,15 +1175,14 @@ function GeniePipelineContent({ isDarkMode }: GeniePipelineProps) {
               ? JSON.stringify(project.evaluation || {})
               : 'No data';
     try {
-      const result = await chatCompletion({
-        systemPrompt,
-        userPrompt: `Stage: ${stage}\nData: ${stageData}`,
-        temperature: 0.2,
-        maxTokens: 120,
-        orgId: currentOrg?.id
+      const { data: summaryData } = await apiClient.post('/ai/chat/', {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Stage: ${stage}\nData: ${stageData}` },
+        ],
+        model: 'gpt-4o-mini',
       });
-      const payload = result.data as { content?: string };
-      const content = payload.content || `Summary for ${stage} completed.`;
+      const content = (summaryData as { content?: string })?.content || `Summary for ${stage} completed.`;
       updateProject({
         copilot: {
           prompts: project.copilot?.prompts || {},
@@ -1180,7 +1202,7 @@ function GeniePipelineContent({ isDarkMode }: GeniePipelineProps) {
     } catch {
       // ignore summary failures
     }
-  }, [project, updateProject, chatCompletion, currentOrg?.id]);
+  }, [project, updateProject, currentOrg?.id]);
 
   useEffect(() => {
     if (!project) return;
@@ -1651,15 +1673,14 @@ Last action: ${lastAction ? `${lastAction.action} (${lastAction.status || 'succe
 User: ${message}
 
 Respond in 2-4 short sentences with next steps tailored to this stage.`;
-                const result = await chatCompletion({
-                  systemPrompt,
-                  userPrompt,
-                  temperature: 0.3,
-                  maxTokens: 220,
-                  orgId: currentOrg?.id
+                const { data: pipelineData } = await apiClient.post('/ai/chat/', {
+                  messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt },
+                  ],
+                  model: 'gpt-4o-mini',
                 });
-                const payload = result.data as { content?: string };
-                return payload.content || 'No response returned.';
+                return (pipelineData as { content?: string })?.content || 'No response returned.';
               }}
             />
           </div>

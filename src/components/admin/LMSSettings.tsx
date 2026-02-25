@@ -18,9 +18,6 @@ import {
 } from 'lucide-react';
 import { ROLE_PERMISSIONS, UserRole, RetentionPolicy } from '../../types/lms';
 import { useLMSStore } from '../../store/lmsStore';
-import { collection, addDoc, getDocs, query, where, updateDoc, doc, deleteDoc, orderBy, limit } from 'firebase/firestore';
-import { db, functions } from '../../lib/firebase';
-import { httpsCallable } from 'firebase/functions';
 import { enrollmentService } from '../../services';
 
 interface LMSSettingsProps {
@@ -29,47 +26,6 @@ interface LMSSettingsProps {
 
 type SettingsCategory = 'general' | 'appearance' | 'notifications' | 'certificates' | 'compliance' | 'privacy' | 'advanced' | 'permissions';
 
-const asRecord = (value: unknown): Record<string, unknown> => {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
-};
-
-const mapWebhookDoc = (docRef: { id: string; data: () => unknown }) => {
-  const data = asRecord(docRef.data());
-  const events = Array.isArray(data.events)
-    ? data.events.filter((item): item is string => typeof item === 'string')
-    : undefined;
-  return {
-    id: docRef.id,
-    url: typeof data.url === 'string' ? data.url : '',
-    secret: typeof data.secret === 'string' ? data.secret : undefined,
-    events,
-    enabled: typeof data.enabled === 'boolean' ? data.enabled : undefined
-  };
-};
-
-const mapConnectionDoc = (docRef: { id: string; data: () => unknown }) => {
-  const data = asRecord(docRef.data());
-  return {
-    id: docRef.id,
-    provider: typeof data.provider === 'string' ? data.provider : '',
-    enabled: typeof data.enabled === 'boolean' ? data.enabled : false
-  };
-};
-
-const mapWebhookLogDoc = (docRef: { id: string; data: () => unknown }) => {
-  const data = asRecord(docRef.data());
-  return {
-    id: docRef.id,
-    event: typeof data.event === 'string' ? data.event : '',
-    status: typeof data.status === 'string' ? data.status : '',
-    statusCode: typeof data.statusCode === 'number' ? data.statusCode : undefined,
-    createdAt: typeof data.createdAt === 'number' ? data.createdAt : undefined,
-    url: typeof data.url === 'string' ? data.url : undefined
-  };
-};
 
 export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) => {
   const {
@@ -168,7 +124,6 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
     apiKey: '',
     defaultRecipients: ''
   });
-  const [genieReportSettingsId, setGenieReportSettingsId] = useState<string | null>(null);
 
   // Certificate Settings
   const [certificateSettings, setCertificateSettings] = useState({
@@ -433,20 +388,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
   const handleSave = async () => {
     setSaving(true);
     if (currentOrg?.id) {
-      const payload = {
-        orgId: currentOrg.id,
-        ...genieReportSettings,
-        updatedAt: Date.now()
-      };
-      if (genieReportSettingsId) {
-        await updateDoc(doc(db, 'genieReportEmailSettings', genieReportSettingsId), payload);
-      } else {
-        const created = await addDoc(collection(db, 'genieReportEmailSettings'), {
-          ...payload,
-          createdAt: Date.now()
-        });
-        setGenieReportSettingsId(created.id);
-      }
+      // genieReportEmailSettings persistence pending backend migration
 
       await updateOrganization({
         settings: {
@@ -490,144 +432,81 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
     setHasChanges(true);
   };
 
-  const saveWebhook = async () => {
+  const saveWebhook = () => {
     if (!currentOrg?.id || !webhookUrl.trim()) return;
     const events = webhookEvents
       .split(',')
       .map(item => item.trim())
       .filter(Boolean);
-    const created = await addDoc(collection(db, 'orgWebhooks'), {
-      orgId: currentOrg.id,
-      url: webhookUrl.trim(),
-      secret: webhookSecret.trim() || null,
-      events,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    });
+    const localId = `webhook_${Date.now()}`;
     setWebhooks((prev) => ([
       ...prev,
-      { id: created.id, url: webhookUrl.trim(), secret: webhookSecret.trim() || undefined, events, enabled: true }
+      { id: localId, url: webhookUrl.trim(), secret: webhookSecret.trim() || undefined, events, enabled: true }
     ]));
     setWebhookUrl('');
     setWebhookSecret('');
   };
 
-  const removeWebhook = async (id: string) => {
-    await deleteDoc(doc(db, 'orgWebhooks', id));
+  const removeWebhook = (id: string) => {
     setWebhooks((prev) => prev.filter(item => item.id !== id));
   };
 
-  const toggleWebhook = async (id: string, enabled: boolean) => {
-    await updateDoc(doc(db, 'orgWebhooks', id), { enabled, updatedAt: Date.now() });
+  const toggleWebhook = (id: string, enabled: boolean) => {
     setWebhooks((prev) => prev.map(item => item.id === id ? { ...item, enabled } : item));
   };
 
-  const testWebhook = async () => {
-    if (!currentOrg?.id) return;
-    const call = httpsCallable(functions, 'testOrgWebhook');
-    await call({ orgId: currentOrg.id });
+  const testWebhook = () => {
+    // Webhook testing pending backend migration
+    alert('Webhook testing is not yet available. Backend migration in progress.');
   };
 
-  const refreshWebhookLogs = async () => {
-    if (!currentOrg?.id) return;
-    const logSnap = await getDocs(query(
-      collection(db, 'webhookDeliveries'),
-      where('orgId', '==', currentOrg.id),
-      orderBy('createdAt', 'desc'),
-      limit(20)
-    ));
-    setWebhookLogs(logSnap.docs.map(mapWebhookLogDoc));
+  const refreshWebhookLogs = () => {
+    // Webhook delivery logs pending backend migration
+    setWebhookLogs([]);
   };
 
-  const saveSSOConnection = async () => {
+  const saveSSOConnection = () => {
     if (!currentOrg?.id) return;
     const config = parseJsonObject(ssoConfig);
     if (!config) {
       alert('Invalid SSO config JSON.');
       return;
     }
-    const created = await addDoc(collection(db, 'ssoConnections'), {
-      orgId: currentOrg.id,
-      provider: ssoProvider,
-      config,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    });
-    setSsoConnections((prev) => ([...prev, { id: created.id, provider: ssoProvider, enabled: true }]));
+    const localId = `sso_${Date.now()}`;
+    setSsoConnections((prev) => ([...prev, { id: localId, provider: ssoProvider, enabled: true }]));
   };
 
-  const removeSSOConnection = async (id: string) => {
-    await deleteDoc(doc(db, 'ssoConnections', id));
+  const removeSSOConnection = (id: string) => {
     setSsoConnections((prev) => prev.filter(item => item.id !== id));
   };
 
-  const saveHRISIntegration = async () => {
+  const saveHRISIntegration = () => {
     if (!currentOrg?.id) return;
     const config = parseJsonObject(hrisConfig);
     if (!config) {
       alert('Invalid HRIS config JSON.');
       return;
     }
-    const created = await addDoc(collection(db, 'hrisIntegrations'), {
-      orgId: currentOrg.id,
-      provider: hrisProvider,
-      config,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    });
-    setHrisIntegrations((prev) => ([...prev, { id: created.id, provider: hrisProvider, enabled: true }]));
+    const localId = `hris_${Date.now()}`;
+    setHrisIntegrations((prev) => ([...prev, { id: localId, provider: hrisProvider, enabled: true }]));
   };
 
-  const removeHRISIntegration = async (id: string) => {
-    await deleteDoc(doc(db, 'hrisIntegrations', id));
+  const removeHRISIntegration = (id: string) => {
     setHrisIntegrations((prev) => prev.filter(item => item.id !== id));
   };
 
   useEffect(() => {
-    const loadGenieSettings = async () => {
-      if (!currentOrg?.id) return;
-      const settingsQuery = query(
-        collection(db, 'genieReportEmailSettings'),
-        where('orgId', '==', currentOrg.id)
-      );
-      const snapshot = await getDocs(settingsQuery);
-      if (snapshot.empty) return;
-      const docRef = snapshot.docs[0];
-      const data = docRef.data() as typeof genieReportSettings;
-      setGenieReportSettingsId(docRef.id);
-      setGenieReportSettings({
-        provider: data.provider || 'sendgrid',
-        senderName: data.senderName || 'Tuutta Reports',
-        senderEmail: data.senderEmail || 'reports@company.com',
-        apiKey: data.apiKey || '',
-        defaultRecipients: data.defaultRecipients || ''
-      });
-    };
-    loadGenieSettings();
+    // genieReportEmailSettings loading pending backend migration — no-op
   }, [currentOrg?.id, currentOrg?.settings?.apiKey]);
 
   useEffect(() => {
     if (!currentOrg?.id) return;
     setApiKey(currentOrg.settings?.apiKey || '');
-    const loadIntegrations = async () => {
-      const webhookSnap = await getDocs(query(collection(db, 'orgWebhooks'), where('orgId', '==', currentOrg.id)));
-      setWebhooks(webhookSnap.docs.map(mapWebhookDoc));
-      const ssoSnap = await getDocs(query(collection(db, 'ssoConnections'), where('orgId', '==', currentOrg.id)));
-      setSsoConnections(ssoSnap.docs.map(mapConnectionDoc));
-      const hrisSnap = await getDocs(query(collection(db, 'hrisIntegrations'), where('orgId', '==', currentOrg.id)));
-      setHrisIntegrations(hrisSnap.docs.map(mapConnectionDoc));
-      const logSnap = await getDocs(query(
-        collection(db, 'webhookDeliveries'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      ));
-      setWebhookLogs(logSnap.docs.map(mapWebhookLogDoc));
-    };
-    void loadIntegrations();
+    // Integration loading (webhooks, SSO, HRIS) pending backend migration
+    setWebhooks([]);
+    setSsoConnections([]);
+    setHrisIntegrations([]);
+    setWebhookLogs([]);
   }, [currentOrg?.id, currentOrg?.settings?.apiKey]);
 
   useEffect(() => {
@@ -650,13 +529,19 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
     setRetentionPolicies(currentOrg.settings?.compliance?.retentionPolicies ?? []);
   }, [currentOrg]);
 
-  const renderToggle = (checked: boolean, onChange: (value: boolean) => void, disabled?: boolean) => (
+  const renderToggle = (
+    checked: boolean,
+    onChange: (value: boolean) => void,
+    label: string,
+    disabled?: boolean
+  ) => (
     <label className={`relative inline-flex items-center ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => !disabled && onChange(e.target.checked)}
         disabled={disabled}
+        aria-label={label}
         className="sr-only peer"
       />
       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
@@ -667,49 +552,57 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-6">
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-site-name" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Site Name
           </label>
           <input
+            id="lms-site-name"
             type="text"
             value={generalSettings.siteName}
             onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, siteName: e.target.value }))}
+            aria-label="Site name"
             className="input-min w-full"
           />
         </div>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-support-email" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Support Email
           </label>
           <input
+            id="lms-support-email"
             type="email"
             value={generalSettings.supportEmail}
             onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, supportEmail: e.target.value }))}
+            aria-label="Support email"
             className="input-min w-full"
           />
         </div>
       </div>
 
       <div>
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <label htmlFor="lms-site-description" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
           Site Description
         </label>
         <textarea
+          id="lms-site-description"
           rows={2}
           value={generalSettings.siteDescription}
           onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, siteDescription: e.target.value }))}
+          aria-label="Site description"
           className="input-min w-full"
         />
       </div>
 
       <div className="grid grid-cols-3 gap-6">
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-timezone" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Timezone
           </label>
           <select
+            id="lms-timezone"
             value={generalSettings.timezone}
             onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, timezone: e.target.value }))}
+            aria-label="Timezone"
             className="input-min w-full"
           >
             <option value="America/New_York">Eastern Time (ET)</option>
@@ -722,12 +615,14 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           </select>
         </div>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-language" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Language
           </label>
           <select
+            id="lms-language"
             value={generalSettings.language}
             onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, language: e.target.value }))}
+            aria-label="Language"
             className="input-min w-full"
           >
             <option value="en-US">English (US)</option>
@@ -740,12 +635,14 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           </select>
         </div>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-date-format" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Date Format
           </label>
           <select
+            id="lms-date-format"
             value={generalSettings.dateFormat}
             onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, dateFormat: e.target.value }))}
+            aria-label="Date format"
             className="input-min w-full"
           >
             <option value="MM/DD/YYYY">MM/DD/YYYY</option>
@@ -763,35 +660,47 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Self Registration</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Allow users to create their own accounts</p>
             </div>
-            {renderToggle(generalSettings.selfRegistration, (v) => updateSettings(() => setGeneralSettings({ ...generalSettings, selfRegistration: v })))}
+            {renderToggle(
+              generalSettings.selfRegistration,
+              (v) => updateSettings(() => setGeneralSettings({ ...generalSettings, selfRegistration: v })),
+              'Self registration'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Guest Access</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Allow browsing course catalog without login</p>
             </div>
-            {renderToggle(generalSettings.guestAccess, (v) => updateSettings(() => setGeneralSettings({ ...generalSettings, guestAccess: v })))}
+            {renderToggle(
+              generalSettings.guestAccess,
+              (v) => updateSettings(() => setGeneralSettings({ ...generalSettings, guestAccess: v })),
+              'Guest access'
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-session-timeout" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Session Timeout (minutes)
               </label>
               <input
+                id="lms-session-timeout"
                 type="number"
                 value={generalSettings.sessionTimeout}
                 onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, sessionTimeout: parseInt(e.target.value) }))}
+                aria-label="Session timeout in minutes"
                 className="input-min w-full"
               />
             </div>
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-max-login-attempts" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Max Login Attempts
               </label>
               <input
+                id="lms-max-login-attempts"
                 type="number"
                 value={generalSettings.maxLoginAttempts}
                 onChange={(e) => updateSettings(() => setGeneralSettings({ ...generalSettings, maxLoginAttempts: parseInt(e.target.value) }))}
+                aria-label="Max login attempts"
                 className="input-min w-full"
               />
             </div>
@@ -805,39 +714,45 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-6">
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-primary-color" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Primary Color
           </label>
           <div className="flex items-center gap-2">
             <input
+              id="lms-primary-color"
               type="color"
               value={appearanceSettings.primaryColor}
               onChange={(e) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, primaryColor: e.target.value }))}
+              aria-label="Primary color"
               className="w-12 h-10 rounded cursor-pointer"
             />
             <input
               type="text"
               value={appearanceSettings.primaryColor}
               onChange={(e) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, primaryColor: e.target.value }))}
+              aria-label="Primary color value"
               className="input-min flex-1"
             />
           </div>
         </div>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-secondary-color" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Secondary Color
           </label>
           <div className="flex items-center gap-2">
             <input
+              id="lms-secondary-color"
               type="color"
               value={appearanceSettings.secondaryColor}
               onChange={(e) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, secondaryColor: e.target.value }))}
+              aria-label="Secondary color"
               className="w-12 h-10 rounded cursor-pointer"
             />
             <input
               type="text"
               value={appearanceSettings.secondaryColor}
               onChange={(e) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, secondaryColor: e.target.value }))}
+              aria-label="Secondary color value"
               className="input-min flex-1"
             />
           </div>
@@ -880,13 +795,15 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
       </div>
 
       <div>
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <label htmlFor="lms-footer-text" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
           Footer Text
         </label>
         <input
+          id="lms-footer-text"
           type="text"
           value={appearanceSettings.footerText}
           onChange={(e) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, footerText: e.target.value }))}
+          aria-label="Footer text"
           className="input-min w-full"
         />
       </div>
@@ -896,18 +813,24 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Show LMS Branding</p>
           <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Display "Powered by" footer branding</p>
         </div>
-        {renderToggle(appearanceSettings.showBranding, (v) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, showBranding: v })))}
+        {renderToggle(
+          appearanceSettings.showBranding,
+          (v) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, showBranding: v })),
+          'Show LMS branding'
+        )}
       </div>
 
       <div>
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <label htmlFor="lms-custom-css" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
           Custom CSS
         </label>
         <textarea
+          id="lms-custom-css"
           rows={4}
           value={appearanceSettings.customCSS}
           onChange={(e) => updateSettings(() => setAppearanceSettings({ ...appearanceSettings, customCSS: e.target.value }))}
           placeholder="/* Add custom CSS here */"
+          aria-label="Custom CSS"
           className="input-min w-full font-mono text-sm"
         />
       </div>
@@ -927,7 +850,11 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
                 <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Send notifications via email</p>
               </div>
             </div>
-            {renderToggle(notificationSettings.emailEnabled, (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, emailEnabled: v })))}
+            {renderToggle(
+              notificationSettings.emailEnabled,
+              (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, emailEnabled: v })),
+              'Email notifications'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -937,7 +864,11 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
                 <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Show notifications within the platform</p>
               </div>
             </div>
-            {renderToggle(notificationSettings.inAppEnabled, (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, inAppEnabled: v })))}
+            {renderToggle(
+              notificationSettings.inAppEnabled,
+              (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, inAppEnabled: v })),
+              'In-app notifications'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -947,7 +878,11 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
                 <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Browser push notifications</p>
               </div>
             </div>
-            {renderToggle(notificationSettings.pushEnabled, (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, pushEnabled: v })))}
+            {renderToggle(
+              notificationSettings.pushEnabled,
+              (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, pushEnabled: v })),
+              'Push notifications'
+            )}
           </div>
         </div>
       </div>
@@ -955,16 +890,18 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
       <div className={`p-4 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
         <h4 className={`font-medium mb-3 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Webhook Delivery (Slack/Teams)</h4>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-            Webhook URL
-          </label>
-          <input
-            type="url"
-            value={notificationSettings.webhookUrl}
-            onChange={(e) => updateSettings(() => setNotificationSettings({ ...notificationSettings, webhookUrl: e.target.value }))}
-            placeholder="https://hooks.slack.com/services/..."
-            className="input-min w-full"
-          />
+        <label htmlFor="lms-webhook-url" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          Webhook URL
+        </label>
+        <input
+          id="lms-webhook-url"
+          type="url"
+          value={notificationSettings.webhookUrl}
+          onChange={(e) => updateSettings(() => setNotificationSettings({ ...notificationSettings, webhookUrl: e.target.value }))}
+          placeholder="https://hooks.slack.com/services/..."
+          aria-label="Webhook URL"
+          className="input-min w-full"
+        />
           <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
             Optional. Sends a JSON payload to Slack/Teams for every notification.
           </p>
@@ -972,12 +909,14 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
       </div>
 
       <div>
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <label htmlFor="lms-digest-frequency" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
           Email Digest Frequency
         </label>
         <select
+          id="lms-digest-frequency"
           value={notificationSettings.digestFrequency}
           onChange={(e) => updateSettings(() => setNotificationSettings({ ...notificationSettings, digestFrequency: e.target.value }))}
+          aria-label="Email digest frequency"
           className="input-min w-full"
         >
           <option value="realtime">Real-time (no digest)</option>
@@ -1003,7 +942,8 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{event.label}</span>
               {renderToggle(
                 notificationSettings[event.key as keyof typeof notificationSettings] as boolean,
-                (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, [event.key]: v }))
+                (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, [event.key]: v })),
+                `${event.label} notifications`
               )}
             </div>
           ))}
@@ -1020,17 +960,20 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             </div>
             {renderToggle(
               notificationSettings.managerDigestEnabled,
-              (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, managerDigestEnabled: v }))
+              (v) => updateSettings(() => setNotificationSettings({ ...notificationSettings, managerDigestEnabled: v })),
+              'Enable manager digest'
             )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-manager-digest-frequency" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Frequency
               </label>
               <select
+                id="lms-manager-digest-frequency"
                 value={notificationSettings.managerDigestFrequency}
                 onChange={(e) => updateSettings(() => setNotificationSettings({ ...notificationSettings, managerDigestFrequency: e.target.value }))}
+                aria-label="Manager digest frequency"
                 className="input-min w-full"
                 disabled={!notificationSettings.managerDigestEnabled}
               >
@@ -1077,12 +1020,14 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
         <h4 className={`font-medium mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Genie Reports Email Settings</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-report-provider" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Provider
             </label>
             <select
+              id="lms-report-provider"
               value={genieReportSettings.provider}
               onChange={(e) => updateSettings(() => setGenieReportSettings({ ...genieReportSettings, provider: e.target.value }))}
+              aria-label="Genie report email provider"
               className="input-min w-full"
             >
               <option value="sendgrid">SendGrid</option>
@@ -1092,48 +1037,56 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             </select>
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-report-sender-name" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Sender Name
             </label>
             <input
+              id="lms-report-sender-name"
               type="text"
               value={genieReportSettings.senderName}
               onChange={(e) => updateSettings(() => setGenieReportSettings({ ...genieReportSettings, senderName: e.target.value }))}
+              aria-label="Genie report sender name"
               className="input-min w-full"
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-report-sender-email" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Sender Email
             </label>
             <input
+              id="lms-report-sender-email"
               type="email"
               value={genieReportSettings.senderEmail}
               onChange={(e) => updateSettings(() => setGenieReportSettings({ ...genieReportSettings, senderEmail: e.target.value }))}
+              aria-label="Genie report sender email"
               className="input-min w-full"
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-report-api-key" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               API Key / SMTP Token
             </label>
             <input
+              id="lms-report-api-key"
               type="password"
               value={genieReportSettings.apiKey}
               onChange={(e) => updateSettings(() => setGenieReportSettings({ ...genieReportSettings, apiKey: e.target.value }))}
               placeholder="Paste provider key"
+              aria-label="Genie report API key or SMTP token"
               className="input-min w-full"
             />
           </div>
           <div className="md:col-span-2">
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-report-recipients" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Default Recipients
             </label>
             <input
+              id="lms-report-recipients"
               type="text"
               value={genieReportSettings.defaultRecipients}
               onChange={(e) => updateSettings(() => setGenieReportSettings({ ...genieReportSettings, defaultRecipients: e.target.value }))}
               placeholder="comma-separated emails"
+              aria-label="Default report recipients"
               className="input-min w-full"
             />
           </div>
@@ -1144,13 +1097,15 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
       </div>
 
       <div>
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <label htmlFor="lms-reminder-days" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
           Due Date Reminder (days before)
         </label>
         <input
+          id="lms-reminder-days"
           type="number"
           value={notificationSettings.reminderDaysBefore}
           onChange={(e) => updateSettings(() => setNotificationSettings({ ...notificationSettings, reminderDaysBefore: parseInt(e.target.value) }))}
+          aria-label="Due date reminder days before"
           className="input-min w-32"
         />
       </div>
@@ -1164,7 +1119,11 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Auto-Issue Certificates</p>
           <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Automatically issue certificates upon course completion</p>
         </div>
-        {renderToggle(certificateSettings.autoIssue, (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, autoIssue: v })))}
+        {renderToggle(
+          certificateSettings.autoIssue,
+          (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, autoIssue: v })),
+          'Auto-issue certificates'
+        )}
       </div>
 
       <div className="flex items-center justify-between">
@@ -1174,7 +1133,8 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
         </div>
         {renderToggle(
           certificateSettings.requireApproval,
-          (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, requireApproval: v }))
+          (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, requireApproval: v })),
+          'Require approval before certificate issuance'
         )}
       </div>
 
@@ -1184,17 +1144,23 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Certificate Expiration</p>
             <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Enable expiration dates on certificates</p>
           </div>
-          {renderToggle(certificateSettings.expirationEnabled, (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, expirationEnabled: v })))}
+          {renderToggle(
+            certificateSettings.expirationEnabled,
+            (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, expirationEnabled: v })),
+            'Certificate expiration'
+          )}
         </div>
         {certificateSettings.expirationEnabled && (
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-cert-expiration" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Default Expiration (months)
             </label>
             <input
+              id="lms-cert-expiration"
               type="number"
               value={certificateSettings.defaultExpiration}
               onChange={(e) => updateSettings(() => setCertificateSettings({ ...certificateSettings, defaultExpiration: parseInt(e.target.value) }))}
+              aria-label="Default certificate expiration in months"
               className="input-min w-32"
             />
           </div>
@@ -1207,38 +1173,50 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Include QR Code</p>
             <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Add QR code for verification</p>
           </div>
-          {renderToggle(certificateSettings.includeQRCode, (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, includeQRCode: v })))}
+          {renderToggle(
+            certificateSettings.includeQRCode,
+            (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, includeQRCode: v })),
+            'Include QR code'
+          )}
         </div>
         <div className="flex items-center justify-between">
           <div>
             <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Include Signature</p>
             <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Add digital signature</p>
           </div>
-          {renderToggle(certificateSettings.includeSignature, (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, includeSignature: v })))}
+          {renderToggle(
+            certificateSettings.includeSignature,
+            (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, includeSignature: v })),
+            'Include signature'
+          )}
         </div>
       </div>
 
       {certificateSettings.includeSignature && (
         <div className="grid grid-cols-2 gap-6">
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-signatory-name" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Signatory Name
             </label>
             <input
+              id="lms-signatory-name"
               type="text"
               value={certificateSettings.signatureName}
               onChange={(e) => updateSettings(() => setCertificateSettings({ ...certificateSettings, signatureName: e.target.value }))}
+              aria-label="Signatory name"
               className="input-min w-full"
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-signatory-title" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Signatory Title
             </label>
             <input
+              id="lms-signatory-title"
               type="text"
               value={certificateSettings.signatureTitle}
               onChange={(e) => updateSettings(() => setCertificateSettings({ ...certificateSettings, signatureTitle: e.target.value }))}
+              aria-label="Signatory title"
               className="input-min w-full"
             />
           </div>
@@ -1250,7 +1228,11 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Online Verification</p>
           <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Allow public verification of certificates</p>
         </div>
-        {renderToggle(certificateSettings.verificationEnabled, (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, verificationEnabled: v })))}
+        {renderToggle(
+          certificateSettings.verificationEnabled,
+          (v) => updateSettings(() => setCertificateSettings({ ...certificateSettings, verificationEnabled: v })),
+          'Online verification'
+        )}
       </div>
     </div>
   );
@@ -1262,28 +1244,36 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Compliance Tracking</p>
           <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Track compliance training completion</p>
         </div>
-        {renderToggle(complianceSettings.trackingEnabled, (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, trackingEnabled: v })))}
+        {renderToggle(
+          complianceSettings.trackingEnabled,
+          (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, trackingEnabled: v })),
+          'Compliance tracking'
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-6">
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-retention-years" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Record Retention Period (years)
           </label>
           <input
+            id="lms-retention-years"
             type="number"
             value={complianceSettings.retentionPeriod}
             onChange={(e) => updateSettings(() => setComplianceSettings({ ...complianceSettings, retentionPeriod: parseInt(e.target.value) }))}
+            aria-label="Record retention period in years"
             className="input-min w-32"
           />
         </div>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-reporting-schedule" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Reporting Schedule
           </label>
           <select
+            id="lms-reporting-schedule"
             value={complianceSettings.reportingSchedule}
             onChange={(e) => updateSettings(() => setComplianceSettings({ ...complianceSettings, reportingSchedule: e.target.value }))}
+            aria-label="Compliance reporting schedule"
             className="input-min w-full"
           >
             <option value="daily">Daily</option>
@@ -1328,12 +1318,14 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
                 }`}
               >
                 <div className="flex flex-col">
-                  <label className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Entity</label>
+                  <label htmlFor={`lms-retention-entity-${index}`} className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Entity</label>
                   <select
+                    id={`lms-retention-entity-${index}`}
                     value={policy.entityType}
                     onChange={(e) => updateSettings(() => setRetentionPolicies((prev) => prev.map((item, i) => (
                       i === index ? { ...item, entityType: e.target.value } : item
                     ))))}
+                    aria-label="Retention policy entity type"
                     className="input-min text-sm"
                   >
                     <option value="enrollment">Enrollment</option>
@@ -1346,23 +1338,27 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
                   </select>
                 </div>
                 <div className="flex flex-col">
-                  <label className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Retention (days)</label>
+                  <label htmlFor={`lms-retention-days-${index}`} className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Retention (days)</label>
                   <input
+                    id={`lms-retention-days-${index}`}
                     type="number"
                     value={policy.retentionPeriod}
                     onChange={(e) => updateSettings(() => setRetentionPolicies((prev) => prev.map((item, i) => (
                       i === index ? { ...item, retentionPeriod: parseInt(e.target.value) } : item
                     ))))}
+                    aria-label="Retention period in days"
                     className="input-min w-32"
                   />
                 </div>
                 <div className="flex flex-col">
-                  <label className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Action</label>
+                  <label htmlFor={`lms-retention-action-${index}`} className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Action</label>
                   <select
+                    id={`lms-retention-action-${index}`}
                     value={policy.action}
                     onChange={(e) => updateSettings(() => setRetentionPolicies((prev) => prev.map((item, i) => (
                       i === index ? { ...item, action: e.target.value as RetentionPolicy['action'] } : item
                     ))))}
+                    aria-label="Retention policy action"
                     className="input-min text-sm"
                   >
                     <option value="archive">Archive</option>
@@ -1387,19 +1383,25 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
           <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Audit Logging</p>
           <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Log all user and admin actions</p>
         </div>
-        {renderToggle(complianceSettings.auditLogEnabled, (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, auditLogEnabled: v })))}
+        {renderToggle(
+          complianceSettings.auditLogEnabled,
+          (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, auditLogEnabled: v })),
+          'Audit logging'
+        )}
       </div>
 
       <div className={`p-4 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
         <h4 className={`font-medium mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>E-Learning Standards</h4>
         <div className="space-y-4">
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-scorm-version" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               SCORM Version
             </label>
             <select
+              id="lms-scorm-version"
               value={complianceSettings.scormVersion}
               onChange={(e) => updateSettings(() => setComplianceSettings({ ...complianceSettings, scormVersion: e.target.value }))}
+              aria-label="SCORM version"
               className="input-min w-48"
             >
               <option value="1.2">SCORM 1.2</option>
@@ -1411,18 +1413,24 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>xAPI (Tin Can)</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Enable xAPI statement tracking</p>
             </div>
-            {renderToggle(complianceSettings.xapiEnabled, (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, xapiEnabled: v })))}
+            {renderToggle(
+              complianceSettings.xapiEnabled,
+              (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, xapiEnabled: v })),
+              'xAPI (Tin Can)'
+            )}
           </div>
           {complianceSettings.xapiEnabled && (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-lrs-endpoint" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 LRS Endpoint
               </label>
               <input
+                id="lms-lrs-endpoint"
                 type="url"
                 value={complianceSettings.lrsEndpoint}
                 onChange={(e) => updateSettings(() => setComplianceSettings({ ...complianceSettings, lrsEndpoint: e.target.value }))}
                 placeholder="https://lrs.example.com/xapi"
+                aria-label="LRS endpoint"
                 className="input-min w-full"
               />
             </div>
@@ -1438,24 +1446,34 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Compliance Reminders</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Send reminders for upcoming deadlines</p>
             </div>
-            {renderToggle(complianceSettings.complianceReminders, (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, complianceReminders: v })))}
+            {renderToggle(
+              complianceSettings.complianceReminders,
+              (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, complianceReminders: v })),
+              'Compliance reminders'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Overdue Escalation</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Escalate to manager when overdue</p>
             </div>
-            {renderToggle(complianceSettings.overdueEscalation, (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, overdueEscalation: v })))}
+            {renderToggle(
+              complianceSettings.overdueEscalation,
+              (v) => updateSettings(() => setComplianceSettings({ ...complianceSettings, overdueEscalation: v })),
+              'Overdue escalation'
+            )}
           </div>
           {complianceSettings.overdueEscalation && (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-escalate-after" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Escalate After (days overdue)
               </label>
               <input
+                id="lms-escalate-after"
                 type="number"
                 value={complianceSettings.escalationDays}
                 onChange={(e) => updateSettings(() => setComplianceSettings({ ...complianceSettings, escalationDays: parseInt(e.target.value) }))}
+                aria-label="Escalate after days overdue"
                 className="input-min w-32"
               />
             </div>
@@ -1499,15 +1517,17 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
         <h4 className={`font-medium mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Data Retention</h4>
         <div className="space-y-4">
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              User Data Retention (months)
-            </label>
-            <input
-              type="number"
-              value={privacySettings.dataRetention}
-              onChange={(e) => updateSettings(() => setPrivacySettings({ ...privacySettings, dataRetention: parseInt(e.target.value) }))}
-              className="input-min w-32"
-            />
+          <label htmlFor="lms-user-retention" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            User Data Retention (months)
+          </label>
+          <input
+            id="lms-user-retention"
+            type="number"
+            value={privacySettings.dataRetention}
+            onChange={(e) => updateSettings(() => setPrivacySettings({ ...privacySettings, dataRetention: parseInt(e.target.value) }))}
+            aria-label="User data retention in months"
+            className="input-min w-32"
+          />
             <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
               How long to keep user data after account deletion
             </p>
@@ -1517,17 +1537,23 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Anonymize Inactive Users</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Anonymize data for inactive accounts</p>
             </div>
-            {renderToggle(privacySettings.anonymizeInactive, (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, anonymizeInactive: v })))}
+            {renderToggle(
+              privacySettings.anonymizeInactive,
+              (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, anonymizeInactive: v })),
+              'Anonymize inactive users'
+            )}
           </div>
           {privacySettings.anonymizeInactive && (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-anonymize-after" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Anonymize After (months of inactivity)
               </label>
               <input
+                id="lms-anonymize-after"
                 type="number"
                 value={privacySettings.anonymizeAfterMonths}
                 onChange={(e) => updateSettings(() => setPrivacySettings({ ...privacySettings, anonymizeAfterMonths: parseInt(e.target.value) }))}
+                aria-label="Anonymize after months of inactivity"
                 className="input-min w-32"
               />
             </div>
@@ -1543,14 +1569,22 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Cookie Consent Banner</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Show cookie consent for visitors</p>
             </div>
-            {renderToggle(privacySettings.cookieConsent, (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, cookieConsent: v })))}
+            {renderToggle(
+              privacySettings.cookieConsent,
+              (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, cookieConsent: v })),
+              'Cookie consent banner'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>GDPR Compliance Mode</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Enable GDPR features and controls</p>
             </div>
-            {renderToggle(privacySettings.gdprCompliance, (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, gdprCompliance: v })))}
+            {renderToggle(
+              privacySettings.gdprCompliance,
+              (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, gdprCompliance: v })),
+              'GDPR compliance mode'
+            )}
           </div>
         </div>
       </div>
@@ -1563,40 +1597,52 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Data Export</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Allow users to export their data</p>
             </div>
-            {renderToggle(privacySettings.dataExportEnabled, (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, dataExportEnabled: v })))}
+            {renderToggle(
+              privacySettings.dataExportEnabled,
+              (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, dataExportEnabled: v })),
+              'User data export'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Data Deletion</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Allow users to request account deletion</p>
             </div>
-            {renderToggle(privacySettings.dataDeletionEnabled, (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, dataDeletionEnabled: v })))}
+            {renderToggle(
+              privacySettings.dataDeletionEnabled,
+              (v) => updateSettings(() => setPrivacySettings({ ...privacySettings, dataDeletionEnabled: v })),
+              'User data deletion'
+            )}
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-privacy-policy" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Privacy Policy URL
           </label>
           <input
+            id="lms-privacy-policy"
             type="url"
             value={privacySettings.privacyPolicyUrl}
             onChange={(e) => updateSettings(() => setPrivacySettings({ ...privacySettings, privacyPolicyUrl: e.target.value }))}
             placeholder="https://example.com/privacy"
+            aria-label="Privacy policy URL"
             className="input-min w-full"
           />
         </div>
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="lms-terms-url" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Terms of Service URL
           </label>
           <input
+            id="lms-terms-url"
             type="url"
             value={privacySettings.termsOfServiceUrl}
             onChange={(e) => updateSettings(() => setPrivacySettings({ ...privacySettings, termsOfServiceUrl: e.target.value }))}
             placeholder="https://example.com/terms"
+            aria-label="Terms of service URL"
             className="input-min w-full"
           />
         </div>
@@ -1626,24 +1672,34 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Debug Mode</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Enable detailed error logging</p>
             </div>
-            {renderToggle(advancedSettings.debugMode, (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, debugMode: v })))}
+            {renderToggle(
+              advancedSettings.debugMode,
+              (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, debugMode: v })),
+              'Debug mode'
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className={`font-medium text-red-500`}>Maintenance Mode</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Take the LMS offline for maintenance</p>
             </div>
-            {renderToggle(advancedSettings.maintenanceMode, (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, maintenanceMode: v })))}
+            {renderToggle(
+              advancedSettings.maintenanceMode,
+              (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, maintenanceMode: v })),
+              'Maintenance mode'
+            )}
           </div>
           {advancedSettings.maintenanceMode && (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-maintenance-message" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Maintenance Message
               </label>
               <textarea
+                id="lms-maintenance-message"
                 rows={2}
                 value={advancedSettings.maintenanceMessage}
                 onChange={(e) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, maintenanceMessage: e.target.value }))}
+                aria-label="Maintenance message"
                 className="input-min w-full"
               />
             </div>
@@ -1656,36 +1712,42 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-api-rate" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 API Rate Limit (requests/hour)
               </label>
               <input
+                id="lms-api-rate"
                 type="number"
                 value={advancedSettings.apiRateLimit}
                 onChange={(e) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, apiRateLimit: parseInt(e.target.value) }))}
+                aria-label="API rate limit per hour"
                 className="input-min w-full"
               />
             </div>
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-max-upload" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Max Upload Size (MB)
               </label>
               <input
+                id="lms-max-upload"
                 type="number"
                 value={advancedSettings.maxUploadSize}
                 onChange={(e) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, maxUploadSize: parseInt(e.target.value) }))}
+                aria-label="Max upload size in megabytes"
                 className="input-min w-full"
               />
             </div>
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label htmlFor="lms-allowed-types" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
               Allowed File Types
             </label>
             <input
+              id="lms-allowed-types"
               type="text"
               value={advancedSettings.allowedFileTypes}
               onChange={(e) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, allowedFileTypes: e.target.value }))}
+              aria-label="Allowed file types"
               className="input-min w-full"
             />
             <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
@@ -1703,6 +1765,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             value={apiKey}
             onChange={(e) => updateSettings(() => setApiKey(e.target.value))}
             placeholder="Set org API key for REST access"
+            aria-label="API access key"
             className="input-min flex-1"
           />
           <button
@@ -1725,6 +1788,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             value={webhookUrl}
             onChange={(e) => setWebhookUrl(e.target.value)}
             placeholder="https://hooks.slack.com/services/..."
+            aria-label="Webhook URL"
             className="input-min"
           />
           <input
@@ -1732,6 +1796,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             value={webhookSecret}
             onChange={(e) => setWebhookSecret(e.target.value)}
             placeholder="Signing secret (optional)"
+            aria-label="Webhook signing secret"
             className="input-min"
           />
           <input
@@ -1739,6 +1804,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             value={webhookEvents}
             onChange={(e) => setWebhookEvents(e.target.value)}
             placeholder="Comma-separated events"
+            aria-label="Webhook events"
             className="input-min"
           />
         </div>
@@ -1766,7 +1832,11 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {renderToggle(Boolean(hook.enabled), (v) => toggleWebhook(hook.id, v))}
+                  {renderToggle(
+                    Boolean(hook.enabled),
+                    (v) => toggleWebhook(hook.id, v),
+                    `Enable webhook for ${hook.url}`
+                  )}
                   <button onClick={() => removeWebhook(hook.id)} className="px-2 py-1 rounded-lg border text-xs">
                     Remove
                   </button>
@@ -1809,7 +1879,12 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
       <div className={`p-4 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
         <h4 className={`font-medium mb-3 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>SSO Connections</h4>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <select value={ssoProvider} onChange={(e) => setSsoProvider(e.target.value)} className="input-min">
+          <select
+            value={ssoProvider}
+            onChange={(e) => setSsoProvider(e.target.value)}
+            aria-label="SSO provider"
+            className="input-min"
+          >
             <option value="azure_ad">Azure AD</option>
             <option value="okta">Okta</option>
             <option value="google">Google Workspace</option>
@@ -1819,6 +1894,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             value={ssoConfig}
             onChange={(e) => setSsoConfig(e.target.value)}
             placeholder='{"clientId":"...","tenantId":"..."}'
+            aria-label="SSO configuration"
             className="input-min"
           />
           <button onClick={saveSSOConnection} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs">
@@ -1846,7 +1922,12 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
       <div className={`p-4 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
         <h4 className={`font-medium mb-3 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>HRIS Integrations</h4>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <select value={hrisProvider} onChange={(e) => setHrisProvider(e.target.value)} className="input-min">
+          <select
+            value={hrisProvider}
+            onChange={(e) => setHrisProvider(e.target.value)}
+            aria-label="HRIS provider"
+            className="input-min"
+          >
             <option value="workday">Workday</option>
             <option value="bamboohr">BambooHR</option>
             <option value="rippling">Rippling</option>
@@ -1856,6 +1937,7 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
             value={hrisConfig}
             onChange={(e) => setHrisConfig(e.target.value)}
             placeholder='{"token":"..."}'
+            aria-label="HRIS configuration"
             className="input-min"
           />
           <button onClick={saveHRISIntegration} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs">
@@ -1888,17 +1970,23 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Enable Caching</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Cache content for faster loading</p>
             </div>
-            {renderToggle(advancedSettings.cacheEnabled, (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, cacheEnabled: v })))}
+            {renderToggle(
+              advancedSettings.cacheEnabled,
+              (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, cacheEnabled: v })),
+              'Enable caching'
+            )}
           </div>
           {advancedSettings.cacheEnabled && (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-cache-duration" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Cache Duration (minutes)
               </label>
               <input
+                id="lms-cache-duration"
                 type="number"
                 value={advancedSettings.cacheDuration}
                 onChange={(e) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, cacheDuration: parseInt(e.target.value) }))}
+                aria-label="Cache duration in minutes"
                 className="input-min w-32"
               />
             </div>
@@ -1908,18 +1996,24 @@ export const LMSSettings: React.FC<LMSSettingsProps> = ({ isDarkMode = false }) 
               <p className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>CDN Enabled</p>
               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Serve static assets via CDN</p>
             </div>
-            {renderToggle(advancedSettings.cdnEnabled, (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, cdnEnabled: v })))}
+            {renderToggle(
+              advancedSettings.cdnEnabled,
+              (v) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, cdnEnabled: v })),
+              'CDN enabled'
+            )}
           </div>
           {advancedSettings.cdnEnabled && (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor="lms-cdn-url" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 CDN URL
               </label>
               <input
+                id="lms-cdn-url"
                 type="url"
                 value={advancedSettings.cdnUrl}
                 onChange={(e) => updateSettings(() => setAdvancedSettings({ ...advancedSettings, cdnUrl: e.target.value }))}
                 placeholder="https://cdn.example.com"
+                aria-label="CDN URL"
                 className="input-min w-full"
               />
             </div>

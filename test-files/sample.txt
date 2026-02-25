@@ -1,0 +1,15 @@
+This is a test document for the Tuutta file processing system.
+
+This file contains plain text that should be extracted successfully.
+
+Features being tested:
+1. Text file reading
+2. Content extraction
+3. Progress indicators
+4. Preview modal
+
+Special characters: @#$%^&*()[]{}!?<>
+Symbols: ©®™€£¥
+Emojis: 😀🎉✅
+
+The quick brown fox jumps over the lazy dog.

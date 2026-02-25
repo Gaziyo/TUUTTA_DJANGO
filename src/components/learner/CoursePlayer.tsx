@@ -3,6 +3,14 @@ import { useStore } from '../../store';
 import { useLMSStore } from '../../store/lmsStore';
 import { Course, Lesson, Enrollment, ModuleProgress, ModuleQuiz } from '../../types/lms';
 import { assessmentService, enrollmentService, progressService } from '../../services';
+import { adaptiveReleaseService } from '../../services/adaptiveReleaseService';
+import gapMatrixService from '../../services/gapMatrixService';
+import remediationTriggerService from '../../services/remediationTriggerService';
+import cognitiveProfileService from '../../services/cognitiveProfileService';
+import type { GapMatrixEntry } from '../../services/gapMatrixService';
+import type { RemediationTrigger } from '../../services/remediationTriggerService';
+import type { CognitiveProfile } from '../../services/cognitiveProfileService';
+import { useAppContext } from '../../context/AppContext';
 import {
   X,
   ChevronLeft,
@@ -22,7 +30,11 @@ import {
   Sparkles,
   MessageCircle,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Headphones,
+  Mic,
+  PenLine,
+  Calculator
 } from 'lucide-react';
 import ChatInterface from '../ChatInterface';
 import QuizPlayer from './QuizPlayer';
@@ -53,6 +65,15 @@ const LESSON_ICONS: Record<string, React.ReactNode> = {
   interactive: <Target className="w-4 h-4" />
 };
 
+const MODALITY_ICONS: Record<string, React.ReactNode> = {
+  reading: <BookOpen className="w-3 h-3" />,
+  listening: <Headphones className="w-3 h-3" />,
+  speaking: <Mic className="w-3 h-3" />,
+  writing: <PenLine className="w-3 h-3" />,
+  math: <Calculator className="w-3 h-3" />,
+  general_knowledge: <Sparkles className="w-3 h-3" />
+};
+
 export const CoursePlayer: React.FC<CoursePlayerProps> = ({
   courseId,
   course,
@@ -66,6 +87,7 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
   onModuleSelect,
   onLessonSelect
 }) => {
+  const { openCourse } = useAppContext();
   const { user } = useStore();
   const { createNewChat, addMessage, currentChatId } = useStore(state => ({
     createNewChat: state.createNewChat,
@@ -77,7 +99,7 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
     return state.userData[state.user.id]?.settings ?? null;
   });
   const isDarkMode = isDarkModeProp ?? (settings?.theme ?? 'light') === 'dark';
-  const { courses, enrollments, updateEnrollmentProgress } = useLMSStore();
+  const { courses, enrollments, updateEnrollmentProgress, currentOrg } = useLMSStore();
 
   const resolvedCourse = useMemo(
     () => course ?? courses.find(c => c.id === courseId) ?? null,
@@ -127,6 +149,10 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
   const [enrollmentAttempts, setEnrollmentAttempts] = useState<number>(resolvedEnrollment?.attempts || 0);
   const [progressError, setProgressError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [moduleUnlockStatus, setModuleUnlockStatus] = useState<Record<string, { unlocked: boolean; reasons: string[] }>>({});
+  const [gapEntries, setGapEntries] = useState<GapMatrixEntry[]>([]);
+  const [remediationTriggers, setRemediationTriggers] = useState<RemediationTrigger[]>([]);
+  const [cognitiveProfile, setCognitiveProfile] = useState<CognitiveProfile | null>(null);
 
   // Safe progress update with error handling
   const safeProgressUpdate = useCallback(async (
@@ -150,6 +176,45 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
   const currentLesson = useMemo(() => {
     return currentModule?.lessons.find(l => l.id === currentLessonId) || null;
   }, [currentModule, currentLessonId]);
+
+  const weakAreas = useMemo(() => {
+    if (!cognitiveProfile) return [];
+    const bloom = Object.entries(cognitiveProfile.bloomMastery || {})
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 2)
+      .map(([level]) => `Bloom L${level}`);
+    const modalities = Object.entries(cognitiveProfile.modalityStrengths || {})
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 2)
+      .map(([modality]) => modality.replace('_', ' '));
+    return [...bloom, ...modalities];
+  }, [cognitiveProfile]);
+
+  const lessonContextInfo = useMemo(() => {
+    if (!currentLesson || !currentModule || !resolvedCourse) return '';
+    const content = currentLesson.content || {};
+    const textBlob = [
+      content.htmlContent || '',
+      content.assignmentPrompt || '',
+      content.documentUrl || '',
+      content.videoUrl || '',
+      content.externalUrl || ''
+    ]
+      .join(' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 1200);
+    const focus = weakAreas.length > 0 ? `Weak areas: ${weakAreas.join(', ')}.` : '';
+    return [
+      `Course: ${resolvedCourse.title}`,
+      `Module: ${currentModule.title}`,
+      `Lesson: ${currentLesson.title}`,
+      `Type: ${currentLesson.type}`,
+      focus,
+      `Context: ${textBlob || 'No additional content'}`
+    ].filter(Boolean).join('\n');
+  }, [currentLesson, currentModule, resolvedCourse, weakAreas]);
 
   const currentQuiz = useMemo<ModuleQuiz | null>(() => {
     if (!currentLesson || currentLesson.type !== 'quiz') return null;
@@ -193,6 +258,34 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
   useEffect(() => {
     setEnrollmentAttempts(resolvedEnrollment?.attempts || 0);
   }, [resolvedEnrollment?.attempts]);
+
+  useEffect(() => {
+    const orgId = currentOrg?.id || resolvedEnrollment?.orgId || resolvedEnrollment?.odId || resolvedCourse?.orgId;
+    const userId = resolvedEnrollment?.userId || user?.id;
+    if (!orgId || !userId) return;
+    cognitiveProfileService.getForCurrentUser(orgId).then(setCognitiveProfile);
+    gapMatrixService.listForUser(orgId, userId).then(setGapEntries);
+    remediationTriggerService.listForOrg(orgId).then(setRemediationTriggers);
+  }, [currentOrg?.id, resolvedEnrollment?.orgId, resolvedEnrollment?.odId, resolvedEnrollment?.userId, resolvedCourse?.orgId, user?.id]);
+
+  useEffect(() => {
+    if (!resolvedCourse) return;
+    let cancelled = false;
+    const loadUnlocks = async () => {
+      const updates: Record<string, { unlocked: boolean; reasons: string[] }> = {};
+      await Promise.all(
+        modules.map(async (module) => {
+          const status = await adaptiveReleaseService.getModuleUnlockStatus(resolvedCourse.id, module.id);
+          updates[module.id] = status;
+        })
+      );
+      if (!cancelled) {
+        setModuleUnlockStatus(updates);
+      }
+    };
+    loadUnlocks();
+    return () => { cancelled = true; };
+  }, [resolvedCourse, modules, moduleProgress]);
 
   useEffect(() => {
     if (!resolvedEnrollment || !currentModule || !currentLesson || !resolvedCourse) return;
@@ -258,21 +351,7 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
   }, [courseId, currentLessonId, showTutorPanel]);
 
   const getLessonContext = () => {
-    if (!currentLesson || !currentModule || !resolvedCourse) return '';
-    const content = currentLesson.content || {};
-    const textBlob = [
-      content.htmlContent || '',
-      content.assignmentPrompt || '',
-      content.documentUrl || '',
-      content.videoUrl || '',
-      content.externalUrl || ''
-    ]
-      .join(' ')
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 1200);
-    return `Course: ${resolvedCourse.title}\nModule: ${currentModule.title}\nLesson: ${currentLesson.title}\nType: ${currentLesson.type}\nContext: ${textBlob || 'No additional content'}`;
+    return lessonContextInfo;
   };
 
   const sendTutorPrompt = (prompt: string) => {
@@ -281,9 +360,10 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
       createNewChat();
     }
     const voiceInstruction = voiceOnlyMode ? 'Use voice-friendly short responses.' : '';
+    const focus = weakAreas.length > 0 ? `Focus areas: ${weakAreas.join(', ')}.` : '';
     addMessage({
       role: 'user',
-      content: `Respond in ${tutorLanguage}. ${voiceInstruction} ${prompt}\n\n${getLessonContext()}`
+      content: `Respond in ${tutorLanguage}. ${voiceInstruction} ${prompt}\n\n${focus}\n${getLessonContext()}`
     });
     setShowTutorPanel(true);
   };
@@ -345,8 +425,18 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
     return moduleProgress[moduleId]?.completedLessons?.includes(lessonId) || false;
   };
 
+  const isModuleUnlocked = (moduleId: string) => {
+    const status = moduleUnlockStatus[moduleId];
+    return status ? status.unlocked : true;
+  };
+
+  const getModuleUnlockReasons = (moduleId: string) => {
+    return moduleUnlockStatus[moduleId]?.reasons ?? [];
+  };
+
   // Check if lesson is accessible (sequential progress)
   const isLessonAccessible = (moduleId: string, lessonId: string) => {
+    if (!isModuleUnlocked(moduleId)) return false;
     if (!resolvedCourse.settings?.requireSequentialProgress) return true;
 
     for (const module of modules) {
@@ -361,6 +451,25 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
     }
     return true;
   };
+
+  const remediationSuggestion = useMemo(() => {
+    if (!currentModule || !resolvedCourse) return null;
+    const progress = moduleProgress[currentModule.id];
+    if (!progress) return null;
+    const minScore = resolvedCourse.settings?.completionCriteria?.minScore ?? 70;
+    if ((progress.quizAttempts ?? 0) < 2) return null;
+    if ((progress.quizScore ?? 100) >= minScore) return null;
+
+    const trigger = remediationTriggers.find(t => t.is_active !== false);
+    const gapEntry = gapEntries.find(entry => entry.status === 'open');
+    const remediationCourseId = trigger?.remediation_course || gapEntry?.recommendedCourseId;
+    const remediationCourseTitle = trigger?.remediation_course_title || gapEntry?.recommendedCourseTitle;
+    return {
+      courseId: remediationCourseId,
+      courseTitle: remediationCourseTitle || 'Remediation course',
+      reason: `You scored below ${minScore}% twice. A remediation module is recommended.`
+    };
+  }, [currentModule, resolvedCourse, moduleProgress, remediationTriggers, gapEntries]);
 
   // Mark lesson as complete
   const meetsCompletionCriteria = (progressState: Record<string, ModuleProgress>) => {
@@ -802,6 +911,8 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
             {modules.map((module, moduleIndex) => {
               const moduleComplete = moduleProgress[module.id]?.status === 'completed';
               const moduleLessonsComplete = moduleProgress[module.id]?.completedLessons?.length || 0;
+              const moduleLocked = !isModuleUnlocked(module.id);
+              const moduleReasons = getModuleUnlockReasons(module.id);
 
               return (
                 <div key={module.id} className="mb-2">
@@ -828,6 +939,14 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
                         {moduleLessonsComplete}/{module.lessons.length} lessons
                       </p>
                     </div>
+                    {moduleLocked && (
+                      <span
+                        className={`text-[10px] px-2 py-1 rounded-full ${isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600'}`}
+                        title={moduleReasons.length ? moduleReasons.join(' • ') : 'Locked'}
+                      >
+                        Locked
+                      </span>
+                    )}
                   </button>
 
                   {/* Lessons */}
@@ -837,6 +956,8 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
                         const isComplete = isLessonCompleted(module.id, lesson.id);
                         const isAccessible = isLessonAccessible(module.id, lesson.id);
                         const isCurrent = currentModuleId === module.id && currentLessonId === lesson.id;
+                        const bloomBadge = lesson.bloomLevel ? `L${lesson.bloomLevel}` : null;
+                        const modalityIcon = lesson.modality ? MODALITY_ICONS[lesson.modality] : null;
 
                         return (
                           <button
@@ -861,6 +982,18 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
                               LESSON_ICONS[lesson.type] || <FileText className="w-4 h-4 flex-shrink-0" />
                             )}
                             <span className="truncate">{lesson.title}</span>
+                            {bloomBadge && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                isCurrent ? 'bg-indigo-500/40 text-indigo-100' : isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
+                              }`}>
+                                {bloomBadge}
+                              </span>
+                            )}
+                            {modalityIcon && (
+                              <span className={`${isCurrent ? 'text-indigo-100' : isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                {modalityIcon}
+                              </span>
+                            )}
                             <span className={`text-xs ml-auto ${
                               isCurrent ? 'text-indigo-200' : isDarkMode ? 'text-gray-500' : 'text-gray-400'
                             }`}>
@@ -965,6 +1098,27 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
               >
                 Start Pre‑Assessment
               </button>
+            </div>
+          )}
+
+          {remediationSuggestion && (
+            <div className={`mx-6 mt-4 mb-2 rounded-xl border p-4 flex flex-col md:flex-row items-start md:items-center gap-3 ${
+              isDarkMode ? 'border-rose-600/40 bg-rose-900/20' : 'border-rose-200 bg-rose-50'
+            }`}>
+              <div className="flex-1">
+                <p className="text-sm font-semibold">Remediation recommended</p>
+                <p className={`text-xs ${isDarkMode ? 'text-rose-200/80' : 'text-rose-700'}`}>
+                  {remediationSuggestion.reason}
+                </p>
+              </div>
+              {remediationSuggestion.courseId && (
+                <button
+                  onClick={() => openCourse(remediationSuggestion.courseId!, remediationSuggestion.courseTitle)}
+                  className="px-3 py-2 rounded-lg text-xs font-medium bg-rose-500 text-white hover:bg-rose-600"
+                >
+                  Start Remediation
+                </button>
+              )}
             </div>
           )}
           {currentLesson ? (
@@ -1113,7 +1267,7 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({
               </div>
             </div>
             <div className="h-[calc(100%-64px)]">
-              <ChatInterface />
+              <ChatInterface contextInfo={lessonContextInfo} focusAreas={weakAreas} />
             </div>
           </aside>
         </div>

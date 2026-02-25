@@ -33,6 +33,17 @@ class Course(models.Model):
 
     published_at = models.DateTimeField(null=True, blank=True)
 
+    # Cognitive OS extensions
+    target_bloom_depth = models.IntegerField(null=True, blank=True)   # highest Bloom level targeted (1-6)
+    competency_tag = models.ForeignKey(
+        'competencies.Competency',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='courses',
+    )
+    ai_generated = models.BooleanField(default=False)
+
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_courses')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -49,6 +60,13 @@ class Course(models.Model):
 
 
 class CourseModule(models.Model):
+    BLOOM_BANDS = [
+        ('foundation', 'Foundation'),       # Bloom 1-2
+        ('application', 'Application'),     # Bloom 3
+        ('analysis', 'Analysis'),           # Bloom 4
+        ('critical', 'Critical/Creative'),  # Bloom 5-6
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='modules')
 
@@ -58,6 +76,18 @@ class CourseModule(models.Model):
 
     is_required = models.BooleanField(default=True)
     estimated_duration = models.IntegerField(null=True, blank=True)
+
+    # Cognitive OS extensions
+    bloom_band = models.CharField(max_length=20, choices=BLOOM_BANDS, blank=True)
+    bloom_level_min = models.IntegerField(null=True, blank=True)  # lowest Bloom level in module
+    bloom_level_max = models.IntegerField(null=True, blank=True)  # highest Bloom level in module
+    unlock_requires = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='unlocks',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -81,6 +111,15 @@ class Lesson(models.Model):
         ('scorm', 'SCORM'),
     ]
 
+    MODALITIES = [
+        ('reading', 'Reading'),
+        ('writing', 'Writing'),
+        ('listening', 'Listening'),
+        ('speaking', 'Speaking'),
+        ('math', 'Math'),
+        ('general_knowledge', 'General Knowledge'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     module = models.ForeignKey(CourseModule, on_delete=models.CASCADE, related_name='lessons')
 
@@ -101,6 +140,10 @@ class Lesson(models.Model):
         blank=True,
     )
 
+    # Cognitive OS extensions
+    bloom_level = models.IntegerField(null=True, blank=True)   # 1=Remember … 6=Create
+    modality = models.CharField(max_length=20, choices=MODALITIES, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -110,3 +153,49 @@ class Lesson(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class AdaptiveReleaseRule(models.Model):
+    RULE_TYPES = [
+        ('prerequisite_module', 'Prerequisite Module'),
+        ('assessment_passed', 'Assessment Passed'),
+        ('bloom_mastery', 'Bloom Mastery'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='adaptive_release_rules')
+    module = models.ForeignKey(CourseModule, on_delete=models.CASCADE, related_name='adaptive_release_rules')
+
+    rule_type = models.CharField(max_length=30, choices=RULE_TYPES)
+    prerequisite_module = models.ForeignKey(
+        CourseModule,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='adaptive_release_dependents',
+    )
+    assessment = models.ForeignKey(
+        'assessments.Assessment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='adaptive_release_rules',
+    )
+    min_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    min_bloom_level = models.IntegerField(null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'adaptive_release_rules'
+        indexes = [
+            models.Index(fields=['course', 'module']),
+            models.Index(fields=['rule_type']),
+        ]
+
+    def __str__(self):
+        return f'AdaptiveReleaseRule({self.course_id}, {self.module_id}, {self.rule_type})'

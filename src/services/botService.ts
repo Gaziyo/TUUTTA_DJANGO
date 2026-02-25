@@ -1,71 +1,38 @@
-import {
-  arrayUnion,
-  collection,
-  doc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+/**
+ * Bot Service
+ *
+ * AI bot session persistence layer.
+ * Stubbed: no Django /ai/sessions/ endpoint exists yet.
+ * AI completions route to /ai/chat/ (ChatCompletionView) — see openai.ts.
+ */
+
 import type { BotMessage, BotSession } from '../context/BotPipelineContext';
 
-const COLLECTION = 'botSessions';
-
-function botCollection(orgId: string) {
-  return collection(db, 'organizations', orgId, COLLECTION);
+/**
+ * Load all bot sessions for a user in an organization.
+ * Stubbed until a Django session-storage endpoint is available.
+ */
+export async function loadBotSessions(
+  _orgId: string,
+  _userId: string
+): Promise<BotSession[]> {
+  return [];
 }
 
-type BotMessageDoc = {
-  id: string;
-  role: BotMessage['role'];
-  content: string;
-  createdAt?: { toDate?: () => Date } | Date;
-};
+/**
+ * Create or update a bot session (upsert by session.id).
+ */
+export async function upsertBotSession(
+  _orgId: string,
+  _userId: string,
+  _session: BotSession
+): Promise<void> {}
 
-export async function loadBotSessions(orgId: string, userId: string) {
-  const q = query(
-    botCollection(orgId),
-    where('userId', '==', userId),
-    orderBy('updatedAt', 'desc')
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(docSnap => {
-    const data = docSnap.data();
-    return {
-      id: docSnap.id,
-      title: data.title ?? 'AI Bot Session',
-      createdAt: data.createdAt?.toDate?.() ?? new Date(),
-      updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
-      messages: (data.messages ?? []).map((msg: BotMessageDoc) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        createdAt: msg.createdAt?.toDate?.() ?? new Date()
-      }))
-    } as BotSession;
-  });
-}
-
-export async function upsertBotSession(orgId: string, userId: string, session: BotSession) {
-  const ref = doc(botCollection(orgId), session.id);
-  await setDoc(ref, {
-    title: session.title,
-    userId,
-    orgId,
-    createdAt: session.createdAt ?? serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    messages: session.messages
-  }, { merge: true });
-}
-
-export async function appendBotMessage(orgId: string, sessionId: string, message: BotMessage) {
-  const ref = doc(botCollection(orgId), sessionId);
-  await updateDoc(ref, {
-    updatedAt: serverTimestamp(),
-    messages: arrayUnion(message)
-  });
-}
+/**
+ * Append a message to an existing bot session.
+ */
+export async function appendBotMessage(
+  _orgId: string,
+  _sessionId: string,
+  _message: BotMessage
+): Promise<void> {}

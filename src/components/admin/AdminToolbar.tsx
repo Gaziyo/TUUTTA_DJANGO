@@ -33,6 +33,7 @@ export default function AdminToolbar({
           <input
             type="text"
             placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
             value={searchValue}
             onChange={(e) => onSearchChange?.(e.target.value)}
             className="w-full pl-10 pr-4 py-2 rounded-lg border border-app-border bg-transparent text-app-text placeholder:text-app-muted focus:ring-1 focus:ring-app-border focus:border-app-border"

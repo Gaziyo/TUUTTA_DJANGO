@@ -10,7 +10,6 @@
  *   - Learner: Personal progress overview
  */
 
-import type { GenieReportSchedule, UserRole } from '../types/lms';
 import type { Enrollment, ProgressSummary } from '../types/schema';
 import {
   enrollmentService,
@@ -18,7 +17,6 @@ import {
   userService,
   courseService,
 } from './canonical';
-import * as lmsService from '../lib/lmsService';
 
 // ─── REPORT TYPES ────────────────────────────────────────────────────────────
 
@@ -373,28 +371,6 @@ export const reportService = {
     }
   },
 
-  // ─── LEGACY GENIE REPORTS ────────────────────────────────────────────────────
-
-  listGenieSchedules: (orgId: string) => lmsService.getGenieReportSchedules(orgId),
-
-  listGenieRuns: (orgId: string, limitCount?: number) =>
-    lmsService.getGenieReportRuns(orgId, limitCount),
-
-  createGenieSchedule: (
-    schedule: Omit<GenieReportSchedule, 'id' | 'createdAt' | 'updatedAt' | 'lastRunAt'>
-  ) => lmsService.createGenieReportSchedule(schedule),
-
-  updateGenieSchedule: (scheduleId: string, updates: Partial<GenieReportSchedule>) =>
-    lmsService.updateGenieReportSchedule(scheduleId, updates),
-
-  createGenieRun: (orgId: string, scheduleId: string, recipients: string) =>
-    lmsService.createGenieReportRun(orgId, scheduleId, recipients),
-
-  listManagerDigestRuns: (orgId: string, limitCount?: number) =>
-    lmsService.getManagerDigestRuns(orgId, limitCount),
-
-  createManagerDigestRun: (orgId: string, frequency: 'weekly' | 'monthly', roles: UserRole[]) =>
-    lmsService.createManagerDigestRun(orgId, frequency, roles),
 };
 
 // Helper to convert Firestore timestamp to Date

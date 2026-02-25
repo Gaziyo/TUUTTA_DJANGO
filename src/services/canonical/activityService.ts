@@ -1,23 +1,11 @@
 /**
  * Activity Service — Canonical Implementation
  *
- * Writes to: /activityLog/{orgId}/events/{eventId}
- *
- * This service is fire-and-forget, never throws, never blocks.
- * All other canonical services call this on mutations.
+ * Delegates all event logging to observabilityService (Django Audit Log).
+ * Fire-and-forget: never throws, never blocks.
  */
 
-import {
-  collection,
-  doc,
-  setDoc,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { observabilityService } from '../observabilityService';
 import type { ActivityEvent, ActivityAction } from '../../types/schema';
 
 /**
@@ -31,41 +19,26 @@ export async function logEvent(
   resourceType: ActivityEvent['resourceType'],
   metadata: Record<string, unknown> = {}
 ): Promise<void> {
-  try {
-    const eventsRef = collection(db, 'activityLog', orgId, 'events');
-    const eventRef = doc(eventsRef);
-
-    const event: ActivityEvent = {
-      id: eventRef.id,
-      orgId,
-      userId,
-      action,
-      resourceId,
-      resourceType,
-      metadata,
-      timestamp: serverTimestamp() as any,
-    };
-
-    await setDoc(eventRef, event);
-  } catch (error) {
-    // Fire-and-forget: log but don't throw
-    console.warn('[activityService] Failed to log event:', action, error);
-  }
+  observabilityService.logUserAction({
+    orgId,
+    actorId: userId,
+    action,
+    status: 'success',
+    entityType: resourceType,
+    entityId: resourceId,
+    metadata,
+  }).catch(() => {});
 }
 
 /**
  * Get recent activity events for an organization.
- * Read by admin/manager only.
+ * Stubbed — wire to a Django analytics endpoint in a future phase.
  */
 export async function getRecentEvents(
-  orgId: string,
-  limitCount = 50
+  _orgId: string,
+  _limitCount = 50
 ): Promise<ActivityEvent[]> {
-  const eventsRef = collection(db, 'activityLog', orgId, 'events');
-  const q = query(eventsRef, orderBy('timestamp', 'desc'), limit(limitCount));
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as ActivityEvent);
+  return [];
 }
 
 /**

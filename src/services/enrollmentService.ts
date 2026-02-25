@@ -10,11 +10,11 @@
 
 import type { Enrollment as LegacyEnrollment, EnrollmentStatus as LegacyEnrollmentStatus } from '../types/lms';
 import type { Enrollment as CanonicalEnrollment, EnrollmentStatus } from '../types/schema';
+import { apiClient } from '../lib/api';
 import {
   enrollmentService as canonical,
   generateEnrollmentId,
 } from './canonical';
-import * as lmsService from '../lib/lmsService';
 import { serviceEvents } from './events';
 
 /**
@@ -91,30 +91,18 @@ export const enrollmentService = {
    */
   create: async (enrollment: Omit<LegacyEnrollment, 'id'>): Promise<LegacyEnrollment> => {
     const orgId = enrollment.orgId || enrollment.odId;
-
-    try {
-      const canonicalEnrollment = await canonical.enroll(
-        orgId,
-        enrollment.userId,
-        enrollment.courseId,
-        enrollment.assignedBy,
-        {
-          dueDate: enrollment.dueDate ? new Date(enrollment.dueDate) : undefined,
-        }
-      );
-
-      serviceEvents.emit('enrollment.created', {
-        enrollmentId: canonicalEnrollment.id,
-        orgId: canonicalEnrollment.orgId,
-      });
-
-      return toLegacyEnrollment(canonicalEnrollment);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for create:', error);
-      const created = await lmsService.createEnrollment(enrollment);
-      serviceEvents.emit('enrollment.created', { enrollmentId: created.id, orgId: created.orgId });
-      return created;
-    }
+    const canonicalEnrollment = await canonical.enroll(
+      orgId,
+      enrollment.userId,
+      enrollment.courseId,
+      enrollment.assignedBy,
+      { dueDate: enrollment.dueDate ? new Date(enrollment.dueDate) : undefined }
+    );
+    serviceEvents.emit('enrollment.created', {
+      enrollmentId: canonicalEnrollment.id,
+      orgId: canonicalEnrollment.orgId,
+    });
+    return toLegacyEnrollment(canonicalEnrollment);
   },
 
   /**
@@ -124,9 +112,8 @@ export const enrollmentService = {
     try {
       const enrollment = await canonical.getEnrollment(enrollmentId);
       return enrollment ? toLegacyEnrollment(enrollment) : null;
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for get:', error);
-      return lmsService.getEnrollment(enrollmentId);
+    } catch {
+      return null;
     }
   },
 
@@ -137,9 +124,8 @@ export const enrollmentService = {
     try {
       const enrollments = await canonical.getEnrollmentsForUser(orgId, userId);
       return enrollments.map(toLegacyEnrollment);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for listForUser:', error);
-      return lmsService.getUserEnrollments(orgId, userId);
+    } catch {
+      return [];
     }
   },
 
@@ -150,9 +136,8 @@ export const enrollmentService = {
     try {
       const enrollments = await canonical.getEnrollmentsForCourse(orgId, courseId);
       return enrollments.map(toLegacyEnrollment);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for listForCourse:', error);
-      return lmsService.getCourseEnrollments(orgId, courseId);
+    } catch {
+      return [];
     }
   },
 
@@ -162,14 +147,11 @@ export const enrollmentService = {
   listByStatus: async (orgId: string, status: LegacyEnrollmentStatus): Promise<LegacyEnrollment[]> => {
     try {
       const canonicalStatus = toCanonicalStatus(status);
-      if (!canonicalStatus) {
-        return lmsService.getEnrollmentsByStatus(orgId, status);
-      }
+      if (!canonicalStatus) return [];
       const enrollments = await canonical.getEnrollmentsByStatus(orgId, canonicalStatus);
       return enrollments.map(toLegacyEnrollment);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for listByStatus:', error);
-      return lmsService.getEnrollmentsByStatus(orgId, status);
+    } catch {
+      return [];
     }
   },
 
@@ -180,64 +162,36 @@ export const enrollmentService = {
     try {
       const enrollments = await canonical.getEnrollmentsForOrg(orgId);
       return enrollments.map(toLegacyEnrollment);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for listForOrg:', error);
-      return lmsService.getOrgEnrollments(orgId);
+    } catch {
+      return [];
     }
   },
 
   /**
    * Get enrollments for org with pagination.
-   * Note: Canonical service doesn't support pagination yet, falls back to legacy.
+   * Uses Django API — admin org-level query (server enforces role check).
    */
-  listForOrgPage: (orgId: string, options: { limitCount: number; cursor?: unknown }) =>
-    lmsService.getOrgEnrollmentsPage(orgId, options),
+  listForOrgPage: async (orgId: string, _options: { limitCount: number; cursor?: unknown }) => {
+    try {
+      const enrollments = await canonical.getEnrollmentsForOrg(orgId);
+      return { enrollments: enrollments.map(toLegacyEnrollment), lastDoc: null };
+    } catch (error) {
+      console.warn('[enrollmentService] listForOrgPage failed:', error);
+      return { enrollments: [], lastDoc: null };
+    }
+  },
 
   /**
    * Update an enrollment.
    */
   update: async (enrollmentId: string, updates: Partial<LegacyEnrollment>): Promise<void> => {
-    try {
-      const { status, ...passthroughUpdates } = updates;
-
-      // Map status if canonical supports it
-      if (status) {
-        const canonicalStatus = toCanonicalStatus(status);
-        if (canonicalStatus) {
-          await canonical.updateEnrollmentStatus(enrollmentId, canonicalStatus);
-        } else {
-          // Preserve legacy-only statuses such as failed/overdue.
-          await lmsService.updateEnrollment(enrollmentId, { status });
-        }
+    if (updates.status) {
+      const canonicalStatus = toCanonicalStatus(updates.status);
+      if (canonicalStatus) {
+        await canonical.updateEnrollmentStatus(enrollmentId, canonicalStatus);
       }
-
-      // Persist remaining legacy fields (attempts, startedAt, lastAccessedAt, etc.)
-      if (Object.keys(passthroughUpdates).length > 0) {
-        await lmsService.updateEnrollment(enrollmentId, passthroughUpdates);
-      }
-
-      serviceEvents.emit('enrollment.updated', { enrollmentId });
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for update:', error);
-      await lmsService.updateEnrollment(enrollmentId, updates);
-      serviceEvents.emit('enrollment.updated', { enrollmentId });
     }
-  },
-
-  /**
-   * Update enrollment progress.
-   * Note: In canonical architecture, progress is tracked in separate /progress collection.
-   * This method is for backward compatibility with legacy code.
-   */
-  updateProgress: async (
-    enrollmentId: string,
-    progress: number,
-    moduleProgress?: Record<string, unknown>
-  ): Promise<void> => {
-    // For now, use legacy service for progress updates
-    // TODO: Migrate to canonical progressService
-    await lmsService.updateEnrollmentProgress(enrollmentId, progress, moduleProgress);
-    serviceEvents.emit('enrollment.progress_updated', { enrollmentId, progress });
+    serviceEvents.emit('enrollment.updated', { enrollmentId });
   },
 
   /**
@@ -256,20 +210,38 @@ export const enrollmentService = {
     }
   ): Promise<LegacyEnrollment[]> => {
     try {
+      await apiClient.post('/enrollments/bulk-enroll/', {
+        organization: orgId,
+        course: courseId,
+        user_ids: userIds,
+        due_days: options?.dueDate ? Math.max(1, Math.round((options.dueDate - Date.now()) / (1000 * 60 * 60 * 24))) : 30
+      });
+      return userIds.map((userId) => ({
+        id: generateEnrollmentId(orgId, userId, courseId),
+        odId: orgId,
+        orgId,
+        userId,
+        userAuthId: options?.userAuthIdMap?.[userId] ?? userId,
+        courseId,
+        assignedBy,
+        assignedAt: Date.now(),
+        dueDate: options?.dueDate,
+        role: options?.role || 'student',
+        priority: options?.priority || 'required',
+        status: 'not_started',
+        progress: 0,
+        attempts: 0,
+        moduleProgress: {},
+      }));
+    } catch {
       const enrollments = await canonical.bulkEnroll(
         orgId,
         userIds,
         courseId,
         assignedBy,
-        {
-          dueDate: options?.dueDate ? new Date(options.dueDate) : undefined,
-        }
+        { dueDate: options?.dueDate ? new Date(options.dueDate) : undefined }
       );
-
       return enrollments.map(toLegacyEnrollment);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for bulkEnroll:', error);
-      return lmsService.bulkEnroll(orgId, userIds, courseId, assignedBy, options);
     }
   },
 
@@ -277,14 +249,8 @@ export const enrollmentService = {
    * Remove/withdraw an enrollment.
    */
   remove: async (enrollmentId: string): Promise<void> => {
-    try {
-      await canonical.withdrawEnrollment(enrollmentId);
-      serviceEvents.emit('enrollment.deleted', { enrollmentId });
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy service for remove:', error);
-      await lmsService.deleteEnrollment(enrollmentId);
-      serviceEvents.emit('enrollment.deleted', { enrollmentId });
-    }
+    await canonical.withdrawEnrollment(enrollmentId);
+    serviceEvents.emit('enrollment.deleted', { enrollmentId });
   },
 
   /**
@@ -293,10 +259,8 @@ export const enrollmentService = {
   isEnrolled: async (orgId: string, userId: string, courseId: string): Promise<boolean> => {
     try {
       return canonical.isEnrolled(orgId, userId, courseId);
-    } catch (error) {
-      console.warn('[enrollmentService] Falling back to legacy for isEnrolled:', error);
-      const enrollments = await lmsService.getUserEnrollments(orgId, userId);
-      return enrollments.some(e => e.courseId === courseId && e.status !== 'dropped');
+    } catch {
+      return false;
     }
   },
 

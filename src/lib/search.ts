@@ -1,15 +1,6 @@
 import { SearchResult } from '../types';
 import { logger } from './logger';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase';
-
-const NETLIFY_DEV_BASE =
-  import.meta.env.DEV && typeof window !== 'undefined' && window.location.port !== '8888'
-    ? 'http://localhost:8888'
-    : '';
-const DDG_FAST_SEARCH_FUNCTION_URL = `${NETLIFY_DEV_BASE}/.netlify/functions/searchDDG`;
-const DDG_SEARCH_FUNCTION_URL = `${NETLIFY_DEV_BASE}/.netlify/functions/scrapeAndSearchDDG`;
-const webSearchCallable = httpsCallable(functions, 'genieWebSearch');
+import { apiClient } from './api';
 
 function normalizeSnippet(text: string, maxLength = 320): string {
   const compact = text.replace(/\s+/g, ' ').trim();
@@ -51,20 +42,9 @@ function snippetsContainWeatherData(results: SearchResult[]): boolean {
 async function tryDuckDuckGoFastSearch(query: string): Promise<SearchResult[] | null> {
   try {
     logger.debug('[DDG Fast] Attempting search for:', query);
-    const url = `${DDG_FAST_SEARCH_FUNCTION_URL}?query=${encodeURIComponent(query)}`;
-    logger.debug('[DDG Fast] Fetching URL:', url);
-    const response = await fetch(url);
-    logger.debug('[DDG Fast] Response status:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[DDG Fast] Response not OK:', response.status, errorText);
-      return null;
-    }
-
-    const data = await response.json();
+    const { data } = await apiClient.get('/ai/search/', { params: { query, mode: 'fast' } });
     logger.debug('[DDG Fast] Received data:', data);
-    const sources = Array.isArray(data.sources) ? data.sources : [];
+    const sources = Array.isArray((data as any).sources) ? (data as any).sources : [];
     logger.debug('[DDG Fast] Found sources:', sources.length);
 
     return sources
@@ -89,21 +69,10 @@ async function tryDuckDuckGoFastSearch(query: string): Promise<SearchResult[] | 
 async function tryDuckDuckGoSearch(query: string): Promise<SearchResult[] | null> {
   try {
     logger.debug('[DDG Full] Attempting search for:', query);
-    const url = `${DDG_SEARCH_FUNCTION_URL}?query=${encodeURIComponent(query)}`;
-    logger.debug('[DDG Full] Fetching URL:', url);
-    const response = await fetch(url);
-    logger.debug('[DDG Full] Response status:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[DDG Full] Response not OK:', response.status, errorText);
-      return null;
-    }
-
-    const data = await response.json();
+    const { data } = await apiClient.get('/ai/search/', { params: { query, mode: 'full' } });
     logger.debug('[DDG Full] Received data:', data);
-    const sources = Array.isArray(data.sources) ? data.sources : [];
-    const content = Array.isArray(data.content) ? data.content : [];
+    const sources = Array.isArray((data as any).sources) ? (data as any).sources : [];
+    const content = Array.isArray((data as any).content) ? (data as any).content : [];
     logger.debug('[DDG Full] Found sources:', sources.length, 'content items:', content.length);
 
     const contentByUrl = new Map<string, { chunks?: string[] }>();
@@ -145,41 +114,7 @@ export async function performWebSearch(query: string): Promise<SearchResult[]> {
       return [];
     }
 
-    // Primary path: Firebase callable (works in production Firebase hosting).
-    try {
-      logger.debug('[Web Search] Trying Firebase callable search...');
-      const result = await webSearchCallable({ query: cleanQuery });
-      const callableResults = ((result.data as { results?: Array<{ title?: string; url?: string; snippet?: string; source?: string }> })?.results || [])
-        .map(item => {
-          const link = item.url || '';
-          if (!link) return null;
-          let source = item.source || '';
-          if (!source) {
-            try {
-              source = new URL(link).hostname;
-            } catch {
-              source = 'unknown';
-            }
-          }
-          return {
-            title: item.title || 'Untitled',
-            link,
-            snippet: item.snippet || 'No description available',
-            source
-          } as SearchResult;
-        })
-        .filter((item): item is SearchResult => Boolean(item));
-
-      if (callableResults.length > 0) {
-        logger.debug('[Web Search] Firebase callable search succeeded with', callableResults.length, 'results');
-        return callableResults;
-      }
-      logger.warn('[Web Search] Firebase callable returned no results, falling back to Netlify search.');
-    } catch (error) {
-      logger.warn('[Web Search] Firebase callable failed, falling back to Netlify search:', error);
-    }
-
-    // Use DuckDuckGo as primary search (Google CSE is currently unavailable)
+    // Use DuckDuckGo as primary search
     logger.debug('[Web Search] Using DuckDuckGo search...');
 
     // For specific query types, try full DDG scraping

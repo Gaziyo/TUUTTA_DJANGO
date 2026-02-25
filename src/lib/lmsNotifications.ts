@@ -4,28 +4,67 @@
  */
 
 import type { LMSNotification, NotificationChannel, Enrollment, Course, OrgMember } from '../types/lms';
+import { apiClient } from './api';
+
+function mapNotification(n: Record<string, unknown>): LMSNotification {
+  return {
+    id: n.id as string,
+    orgId: (n.organization as string) || '',
+    userId: (n.user as string) || '',
+    type: (n.notification_type as LMSNotification['type']) || 'announcement',
+    title: (n.title as string) || '',
+    message: (n.message as string) || '',
+    data: (n.data as Record<string, unknown>) || {},
+    channels: ['in_app'],
+    status: (n.is_read ? 'read' : 'sent') as LMSNotification['status'],
+    scheduledAt: undefined,
+    sentAt: undefined,
+    readAt: n.read_at ? new Date(n.read_at as string).getTime() : undefined,
+    createdAt: n.created_at ? new Date(n.created_at as string).getTime() : Date.now(),
+  };
+}
 
 export async function createNotification(
-  _notification: Omit<LMSNotification, 'id' | 'createdAt'>
+  notification: Omit<LMSNotification, 'id' | 'createdAt'>
 ): Promise<string> {
-  return '';
+  const { data } = await apiClient.post(`/organizations/${notification.orgId}/notification-outbox/`, {
+    organization: notification.orgId,
+    user: notification.userId,
+    notification_type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    data: notification.data ?? {},
+    channels: notification.channels ?? ['in_app'],
+  });
+  return (data as { id?: string })?.id || '';
 }
 
 export async function getUserNotifications(
-  _orgId: string,
+  orgId: string,
   _userId: string,
   _limitCount?: number
 ): Promise<LMSNotification[]> {
-  return [];
+  try {
+    const { data } = await apiClient.get(`/organizations/${orgId}/notifications/`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(mapNotification);
+  } catch {
+    return [];
+  }
 }
 
-export async function getUnreadCount(_orgId: string, _userId: string): Promise<number> {
-  return 0;
+export async function getUnreadCount(orgId: string, _userId: string): Promise<number> {
+  const notifications = await getUserNotifications(orgId, _userId);
+  return notifications.filter(n => n.status !== 'read').length;
 }
 
-export async function markAsRead(_notificationId: string): Promise<void> {}
+export async function markAsRead(notificationId: string): Promise<void> {
+  await apiClient.post(`/notifications/${notificationId}/mark_read/`);
+}
 
-export async function markAllAsRead(_orgId: string, _userId: string): Promise<void> {}
+export async function markAllAsRead(orgId: string, _userId: string): Promise<void> {
+  await apiClient.post(`/organizations/${orgId}/notifications/mark_all_read/`, { organization: orgId });
+}
 
 export async function notifyTrainingAssigned(
   _orgId: string,

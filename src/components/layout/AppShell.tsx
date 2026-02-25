@@ -36,8 +36,7 @@ import {
   Building2,
   Menu,
 } from 'lucide-react';
-import { signOut } from 'firebase/auth';
-import { auth } from '../../lib/firebase';
+import { useAuthStore } from '../../lib/authStore';
 import { useAuth } from '../auth/useAuth';
 import type { UserRole } from '../../types/schema';
 
@@ -174,13 +173,9 @@ export function AppShell({ orgName }: AppShellProps) {
   );
 
   // Handle sign out
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      navigate('/login');
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
+  const handleSignOut = () => {
+    useAuthStore.getState().logout();
+    navigate('/login');
   };
 
   // Loading state
@@ -219,6 +214,8 @@ export function AppShell({ orgName }: AppShellProps) {
           )}
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hidden lg:flex"
           >
             {sidebarCollapsed ? (
@@ -329,6 +326,8 @@ export function AppShell({ orgName }: AppShellProps) {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open navigation menu"
+              title="Open navigation menu"
               className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
             >
               <Menu className="w-5 h-5" />
@@ -368,12 +367,20 @@ export function AppShell({ orgName }: AppShellProps) {
           {/* Right: Search + Notifications + Avatar */}
           <div className="flex items-center gap-2">
             {/* Search */}
-            <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400">
+            <button
+              aria-label="Search"
+              title="Search"
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+            >
               <Search className="w-5 h-5" />
             </button>
 
             {/* Notifications */}
-            <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 relative">
+            <button
+              aria-label="Notifications"
+              title="Notifications"
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 relative"
+            >
               <Bell className="w-5 h-5" />
               {/* Notification badge */}
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />

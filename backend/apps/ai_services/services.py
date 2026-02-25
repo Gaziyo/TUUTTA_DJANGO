@@ -1,3 +1,4 @@
+import base64
 import openai
 from django.conf import settings
 
@@ -21,6 +22,17 @@ class AIService:
         )
         return transcript.text
 
+    def text_to_speech(self, text: str, voice: str = 'nova', speed: float = 1.0) -> bytes:
+        """Convert text to speech via OpenAI TTS. Returns raw MP3 bytes."""
+        response = self.client.audio.speech.create(
+            model='tts-1',
+            voice=voice,
+            input=text[:4096],
+            speed=max(0.25, min(4.0, speed)),
+            response_format='mp3',
+        )
+        return response.content
+
     def analyze_image(self, image_url: str, prompt: str) -> str:
         response = self.client.chat.completions.create(
             model='gpt-4o',
@@ -35,3 +47,10 @@ class AIService:
             ],
         )
         return response.choices[0].message.content
+
+    def text_embedding(self, text: str, model: str = 'text-embedding-3-small') -> list[float]:
+        response = self.client.embeddings.create(
+            model=model,
+            input=text[:8000],
+        )
+        return response.data[0].embedding

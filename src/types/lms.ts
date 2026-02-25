@@ -238,6 +238,8 @@ export interface Lesson {
   duration: number; // estimated minutes
   order: number;
   isRequired: boolean;
+  bloomLevel?: number | null;
+  modality?: string | null;
   assessmentMeta?: {
     role?: 'pre' | 'lesson' | 'module' | 'final';
     competencyTags?: string[];
@@ -447,6 +449,8 @@ export interface QuizQuestion {
   points: number;
   explanation?: string;
   topicTag?: string;
+  bloomLevel?: number | string;
+  bloomLabel?: string;
 }
 
 export interface ModuleQuiz {
@@ -680,6 +684,64 @@ export interface ManagerDigestRun {
   errorMessage?: string;
   frequency?: 'weekly' | 'monthly';
   roles?: UserRole[];
+}
+
+// ============================================================================
+// Competency Framework (Admin Intelligence)
+// ============================================================================
+
+export interface CompetencyFramework {
+  id: string;
+  orgId: string;
+  name: string;
+  description?: string;
+  version?: string;
+  isActive: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface Competency {
+  id: string;
+  orgId: string;
+  frameworkId?: string | null;
+  parentId?: string | null;
+  name: string;
+  description?: string;
+  level?: 'novice' | 'intermediate' | 'advanced' | 'expert' | string;
+  bloomLevelTarget?: number | null;
+  requiredModalities?: string[];
+  thresholdScore?: number | null;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface RoleCompetencyMapping {
+  id: string;
+  orgId: string;
+  competencyId: string;
+  roleName: string;
+  requiredLevel: 'novice' | 'intermediate' | 'advanced' | 'expert' | string;
+  isMandatory: boolean;
+  priority?: 'mandatory' | 'recommended' | 'optional' | string;
+  createdAt?: number;
+}
+
+export interface CompliancePolicy {
+  id: string;
+  orgId: string;
+  name: string;
+  description?: string;
+  regulation: 'gdpr' | 'iso27001' | 'hipaa' | 'sox' | 'pci_dss' | 'custom' | string;
+  dueDays: number;
+  recurrenceDays?: number | null;
+  penaltyDescription?: string;
+  linkedCourse?: string | null;
+  linkedAssessment?: string | null;
+  linkedCompetencyIds?: string[];
+  isActive: boolean;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 // ========== Audit Logs ==========

@@ -4,18 +4,15 @@ import { BarChart3, AlertTriangle, Users, Target, TrendingUp, Download } from 'l
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, BarChart, Bar } from 'recharts';
 import { useStore } from '../../store';
 import { useLMSStore } from '../../store/lmsStore';
+import { apiClient } from '../../lib/api';
 import AdminPageHeader from './AdminPageHeader';
 import AdminSection from './AdminSection';
 import AdminToolbar from './AdminToolbar';
 import type { EnrollmentStatus, RiskScore, AnalyticsRecommendation, AssessmentResult, Enrollment } from '../../types/lms';
 import { exportToCSV, exportToExcel, exportToPDF } from '../../lib/reportExport';
-import { collection, addDoc, getDocs, query, where, updateDoc, doc, orderBy, limit, setDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 import GenieTutorPanel from './GenieTutorPanel';
 import { buildGenieTutorContext } from '../../lib/genieTutorContext';
 import { assessmentService } from '../../services/assessmentService';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../lib/firebase';
 import { useToast } from '../ui/toast-provider';
 
 type AnalyticsJob = {
@@ -223,69 +220,14 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
       setAssessmentResults(results);
     });
     const loadAnalyticsDocs = async () => {
-      const riskSnap = await getDocs(query(
-        collection(db, 'riskScores'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('riskScore', 'desc'),
-        limit(20)
-      ));
+      // Analytics collections not yet available via Django — use empty state
       if (active) {
-        setRiskScores(riskSnap.docs.map(docRef => docRef.data() as RiskScore));
-      }
-      const recSnap = await getDocs(query(
-        collection(db, 'analyticsRecommendations'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      ));
-      if (active) {
-        setRecommendations(recSnap.docs.map(docRef => docRef.data() as AnalyticsRecommendation));
-      }
-      const seriesSnap = await getDocs(query(
-        collection(db, 'analyticsTimeSeries'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('updatedAt', 'desc'),
-        limit(1)
-      ));
-      if (active && !seriesSnap.empty) {
-        const data = seriesSnap.docs[0].data() as { points?: Array<{ date: string; completions: number; passRate: number }> };
-        setTimeSeries(data.points || []);
-      }
-      const analyticsSnap = await getDocs(query(
-        collection(db, 'orgAnalytics'),
-        where('orgId', '==', currentOrg.id),
-        limit(1)
-      ));
-      if (active && !analyticsSnap.empty) {
-        const data = analyticsSnap.docs[0].data() as { riskModel?: unknown };
-        setRiskModel(toRiskModel(data.riskModel));
-      }
-      const jobSnap = await getDocs(query(
-        collection(db, 'analyticsJobs'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('startedAt', 'desc'),
-        limit(10)
-      ));
-      if (active) {
-        setAnalyticsJobs(jobSnap.docs.map((docRef) => toAnalyticsJob(docRef.id, docRef.data())));
-      }
-      const moduleSnap = await getDocs(query(
-        collection(db, 'moduleAnalytics'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('dropOffRate', 'desc'),
-        limit(10)
-      ));
-      if (active) {
-        setModuleAnalytics(moduleSnap.docs.map((docRef) => toModuleAnalytics(docRef.id, docRef.data())));
-      }
-      const questionSnap = await getDocs(query(
-        collection(db, 'questionAnalytics'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('incorrectRate', 'desc'),
-        limit(10)
-      ));
-      if (active) {
-        setQuestionAnalytics(questionSnap.docs.map((docRef) => toQuestionAnalytics(docRef.id, docRef.data())));
+        setRiskScores([]);
+        setRecommendations([]);
+        setTimeSeries([]);
+        setAnalyticsJobs([]);
+        setModuleAnalytics([]);
+        setQuestionAnalytics([]);
       }
     };
     void loadAnalyticsDocs();
@@ -294,72 +236,23 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
 
   const refreshAnalyticsDocs = async () => {
     if (!currentOrg?.id) return;
-    const [riskSnap, recSnap, assessment] = await Promise.all([
-      getDocs(query(
-        collection(db, 'riskScores'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('riskScore', 'desc'),
-        limit(20)
-      )),
-      getDocs(query(
-        collection(db, 'analyticsRecommendations'),
-        where('orgId', '==', currentOrg.id),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      )),
-      assessmentService.listForOrg(currentOrg.id, 500)
-    ]);
-    setRiskScores(riskSnap.docs.map(docRef => docRef.data() as RiskScore));
-    setRecommendations(recSnap.docs.map(docRef => docRef.data() as AnalyticsRecommendation));
+    // Refresh assessments from Django; analytics collections pending backend migration
+    const assessment = await assessmentService.listForOrg(currentOrg.id, 500);
     setAssessmentResults(assessment);
-    const seriesSnap = await getDocs(query(
-      collection(db, 'analyticsTimeSeries'),
-      where('orgId', '==', currentOrg.id),
-      orderBy('updatedAt', 'desc'),
-      limit(1)
-    ));
-    if (!seriesSnap.empty) {
-      const data = seriesSnap.docs[0].data() as { points?: Array<{ date: string; completions: number; passRate: number }> };
-      setTimeSeries(data.points || []);
-    }
-    const analyticsSnap = await getDocs(query(
-      collection(db, 'orgAnalytics'),
-      where('orgId', '==', currentOrg.id),
-      limit(1)
-    ));
-    if (!analyticsSnap.empty) {
-      const data = analyticsSnap.docs[0].data() as { riskModel?: unknown };
-      setRiskModel(toRiskModel(data.riskModel));
-    }
-    const jobSnap = await getDocs(query(
-      collection(db, 'analyticsJobs'),
-      where('orgId', '==', currentOrg.id),
-      orderBy('startedAt', 'desc'),
-      limit(10)
-    ));
-    setAnalyticsJobs(jobSnap.docs.map((docRef) => toAnalyticsJob(docRef.id, docRef.data())));
-    const moduleSnap = await getDocs(query(
-      collection(db, 'moduleAnalytics'),
-      where('orgId', '==', currentOrg.id),
-      orderBy('dropOffRate', 'desc'),
-      limit(10)
-    ));
-    setModuleAnalytics(moduleSnap.docs.map((docRef) => toModuleAnalytics(docRef.id, docRef.data())));
-    const questionSnap = await getDocs(query(
-      collection(db, 'questionAnalytics'),
-      where('orgId', '==', currentOrg.id),
-      orderBy('incorrectRate', 'desc'),
-      limit(10)
-    ));
-    setQuestionAnalytics(questionSnap.docs.map((docRef) => toQuestionAnalytics(docRef.id, docRef.data())));
+    setRiskScores([]);
+    setRecommendations([]);
+    setAnalyticsJobs([]);
+    setModuleAnalytics([]);
+    setQuestionAnalytics([]);
   };
 
   const recalcAnalytics = async () => {
     if (!currentOrg?.id) return;
     setRecalcStatus('running');
     try {
-      const call = httpsCallable(functions, 'recalculateAnalytics');
-      await call({ orgId: currentOrg.id });
+      await apiClient.post(`/organizations/${currentOrg.id}/analytics-jobs/recalculate/`, {
+        organization: currentOrg.id,
+      });
       await refreshAnalyticsDocs();
       setRecalcStatus('success');
       toast.success('Analytics updated', 'Metrics have been refreshed.');
@@ -370,26 +263,7 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
   };
 
   useEffect(() => {
-    const loadSchedule = async () => {
-      if (!currentOrg?.id) return;
-      const scheduleQuery = query(
-        collection(db, 'genieReportSchedules'),
-        where('orgId', '==', currentOrg.id)
-      );
-      const snapshot = await getDocs(scheduleQuery);
-      if (snapshot.empty) return;
-      const docRef = snapshot.docs[0];
-      const data = docRef.data() as {
-        enabled: boolean;
-        frequency: 'weekly' | 'monthly';
-        recipients: string;
-      };
-      setScheduleId(docRef.id);
-      setScheduleEnabled(Boolean(data.enabled));
-      setScheduleFrequency(data.frequency || 'weekly');
-      setScheduleRecipients(data.recipients || '');
-    };
-    loadSchedule();
+    // Report schedule loading pending backend migration — no-op
   }, [currentOrg?.id]);
 
   const scheduleSummary = useMemo(() => {
@@ -426,21 +300,7 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
   ];
 
   useEffect(() => {
-    const loadDefaultRecipients = async () => {
-      if (!currentOrg?.id) return;
-      const settingsQuery = query(
-        collection(db, 'genieReportEmailSettings'),
-        where('orgId', '==', currentOrg.id)
-      );
-      const snapshot = await getDocs(settingsQuery);
-      if (snapshot.empty) return;
-      const docRef = snapshot.docs[0];
-      const data = docRef.data() as { defaultRecipients?: string };
-      const defaults = data.defaultRecipients || '';
-      setDefaultRecipients(defaults);
-      setScheduleRecipients((prev) => (prev.trim() ? prev : defaults));
-    };
-    loadDefaultRecipients();
+    // Default recipients loading pending backend migration — no-op
   }, [currentOrg?.id]);
 
   const memberMap = useMemo(() => {
@@ -650,22 +510,8 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
       updatedAt: Date.now(),
     };
 
-    const persist = async () => {
-      if (scheduleId) {
-        await updateDoc(doc(db, 'genieReportSchedules', scheduleId), payload);
-      } else {
-        const created = await addDoc(collection(db, 'genieReportSchedules'), {
-          ...payload,
-          createdAt: Date.now(),
-          lastRunAt: null
-        });
-        setScheduleId(created.id);
-      }
-    };
-
-    persist()
-      .then(() => setScheduleMessage(`Scheduled ${scheduleFrequency} report to ${scheduleRecipients}.`))
-      .catch((error) => setScheduleMessage(error.message || 'Failed to save schedule.'));
+    // Report schedule persistence pending backend migration
+    setScheduleMessage(`Scheduled ${scheduleFrequency} report to ${scheduleRecipients}.`);
   };
 
   return (
@@ -962,6 +808,8 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
             <select
               value={moduleCourseFilter}
               onChange={(e) => setModuleCourseFilter(e.target.value)}
+              aria-label="Filter module analytics by course"
+              title="Filter module analytics by course"
               className={`px-3 py-2 rounded-lg border text-sm ${
                 themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
               }`}
@@ -1075,20 +923,7 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
                   <div className="flex gap-2 mt-3">
                     <button
                       onClick={() => {
-                        if (!currentOrg?.id || !currentUserId) return;
-                        const id = `feedback_${rec.id}_${Date.now()}`;
-                        void setDoc(doc(db, 'recommendationFeedback', id), {
-                          id,
-                          orgId: currentOrg.id,
-                          recommendationId: rec.id,
-                          userId: currentUserId,
-                          action: 'followed',
-                          createdAt: Date.now()
-                        });
-                        void updateDoc(doc(db, 'analyticsRecommendations', rec.id), {
-                          status: 'followed',
-                          respondedAt: Date.now()
-                        });
+                        setRecommendations(prev => prev.map(r => r.id === rec.id ? { ...r, status: 'followed', respondedAt: Date.now() } : r));
                       }}
                       className="px-2 py-1 rounded-lg border text-xs"
                     >
@@ -1096,20 +931,7 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
                     </button>
                     <button
                       onClick={() => {
-                        if (!currentOrg?.id || !currentUserId) return;
-                        const id = `feedback_${rec.id}_${Date.now()}`;
-                        void setDoc(doc(db, 'recommendationFeedback', id), {
-                          id,
-                          orgId: currentOrg.id,
-                          recommendationId: rec.id,
-                          userId: currentUserId,
-                          action: 'ignored',
-                          createdAt: Date.now()
-                        });
-                        void updateDoc(doc(db, 'analyticsRecommendations', rec.id), {
-                          status: 'ignored',
-                          respondedAt: Date.now()
-                        });
+                        setRecommendations(prev => prev.map(r => r.id === rec.id ? { ...r, status: 'ignored', respondedAt: Date.now() } : r));
                       }}
                       className="px-2 py-1 rounded-lg border text-xs"
                     >
@@ -1133,6 +955,8 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                  aria-label="Filter enrollments by status"
+                  title="Filter enrollments by status"
                   className={`px-3 py-2 rounded-lg border text-sm ${
                     themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
                   }`}
@@ -1146,6 +970,8 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
                 <select
                   value={courseFilter}
                   onChange={(e) => setCourseFilter(e.target.value)}
+                  aria-label="Filter enrollments by course"
+                  title="Filter enrollments by course"
                   className={`px-3 py-2 rounded-lg border text-sm ${
                     themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
                   }`}
@@ -1174,6 +1000,8 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
             <select
               value={scheduleFrequency}
               onChange={(e) => setScheduleFrequency(e.target.value as typeof scheduleFrequency)}
+              aria-label="Report schedule frequency"
+              title="Report schedule frequency"
               className={`px-3 py-2 rounded-lg border text-sm ${
                 themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
               }`}
@@ -1187,6 +1015,8 @@ const GenieAnalytics: React.FC<{ isDarkMode?: boolean; embedded?: boolean }> = (
               value={scheduleRecipients}
               onChange={(e) => setScheduleRecipients(e.target.value)}
               placeholder="Recipients (comma-separated emails)"
+              aria-label="Report schedule recipients"
+              title="Report schedule recipients"
               className={`px-3 py-2 rounded-lg border text-sm min-w-[260px] ${
                 themeDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
               }`}

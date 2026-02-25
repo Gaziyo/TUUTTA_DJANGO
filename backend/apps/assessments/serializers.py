@@ -19,7 +19,7 @@ class QuestionSerializer(serializers.ModelSerializer):
             'points', 'explanation', 'hint', 'media_url', 'is_required', 'options',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'assessment', 'created_at', 'updated_at']
 
 
 class AssessmentSerializer(serializers.ModelSerializer):

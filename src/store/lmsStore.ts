@@ -28,6 +28,7 @@ import {
   NotificationChannel,
   RemediationAssignment,
 } from '../types/lms';
+import type { GapMatrixEntry } from '../services/gapMatrixService';
 import { useAuthStore } from '../lib/authStore';
 import {
   notifyTrainingAssigned,
@@ -52,7 +53,8 @@ import {
   remediationService,
   statsService,
   learningPathService,
-  observabilityService
+  observabilityService,
+  gapMatrixService
 } from '../services';
 
 const getNotificationChannels = (settings?: {
@@ -92,6 +94,7 @@ interface LMSState {
   competencyScores: CompetencyScore[];
   competencyBadges: CompetencyBadge[];
   remediationAssignments: RemediationAssignment[];
+  gapMatrixEntries: GapMatrixEntry[];
   reportSchedules: GenieReportSchedule[];
   reportRuns: GenieReportRun[];
   managerDigestRuns: ManagerDigestRun[];
@@ -168,6 +171,20 @@ interface LMSState {
   loadCompetencyBadges: () => Promise<void>;
   loadRemediationAssignments: () => Promise<void>;
   updateRemediationAssignment: (assignmentId: string, updates: Partial<RemediationAssignment>) => Promise<void>;
+  loadGapMatrixEntries: (options?: { status?: GapMatrixEntry['status']; priority?: number }) => Promise<void>;
+  createGapMatrixEntry: (payload: {
+    userId: string;
+    competencyId?: string;
+    currentBloomLevel: number;
+    targetBloomLevel: number;
+    gapScore?: number;
+    priority?: GapMatrixEntry['priority'];
+    recommendedCourseId?: string;
+  }) => Promise<GapMatrixEntry | null>;
+  updateGapMatrixEntry: (entryId: string, updates: Partial<Pick<GapMatrixEntry, 'status' | 'priority' | 'recommendedCourseId'>>) => Promise<void>;
+  closeGapMatrixEntry: (entryId: string) => Promise<void>;
+  deleteGapMatrixEntry: (entryId: string) => Promise<void>;
+  bulkCloseLowPriority: (minPriority?: GapMatrixEntry['priority']) => Promise<number>;
   issueCertificate: (params: {
     userId: string;
     courseId: string;
@@ -238,6 +255,7 @@ export const useLMSStore = create<LMSState>()(
       competencyScores: [],
       competencyBadges: [],
       remediationAssignments: [],
+      gapMatrixEntries: [],
       reportSchedules: [],
       reportRuns: [],
       managerDigestRuns: [],
@@ -1200,6 +1218,112 @@ export const useLMSStore = create<LMSState>()(
         }
       },
 
+      loadGapMatrixEntries: async (options) => {
+        const { currentOrg } = get();
+        if (!currentOrg) return;
+        set({ isLoading: true, error: null });
+        try {
+          const entries = await gapMatrixService.listForOrg(currentOrg.id, options);
+          set({ gapMatrixEntries: gapMatrixService.sortByUrgency(entries), isLoading: false });
+        } catch (error) {
+          set({ error: (error as Error).message, isLoading: false });
+        }
+      },
+
+      createGapMatrixEntry: async (payload) => {
+        const { currentOrg } = get();
+        if (!currentOrg) return null;
+        set({ isLoading: true, error: null });
+        try {
+          const entry = await gapMatrixService.create(currentOrg.id, payload);
+          set((state) => ({
+            gapMatrixEntries: gapMatrixService.sortByUrgency([entry, ...state.gapMatrixEntries]),
+            isLoading: false
+          }));
+          return entry;
+        } catch (error) {
+          set({ error: (error as Error).message, isLoading: false });
+          return null;
+        }
+      },
+
+      updateGapMatrixEntry: async (entryId, updates) => {
+        const { currentOrg } = get();
+        if (!currentOrg) return;
+        set({ isLoading: true, error: null });
+        try {
+          await gapMatrixService.update(currentOrg.id, entryId, updates);
+          set((state) => ({
+            gapMatrixEntries: state.gapMatrixEntries.map((entry) =>
+              entry.id === entryId ? { ...entry, ...updates } : entry
+            ),
+            isLoading: false
+          }));
+        } catch (error) {
+          set({ error: (error as Error).message, isLoading: false });
+        }
+      },
+
+      closeGapMatrixEntry: async (entryId) => {
+        const { currentOrg } = get();
+        if (!currentOrg) return;
+        set({ isLoading: true, error: null });
+        try {
+          await gapMatrixService.close(currentOrg.id, entryId);
+          set((state) => ({
+            gapMatrixEntries: state.gapMatrixEntries.map((entry) =>
+              entry.id === entryId ? { ...entry, status: 'closed' } : entry
+            ),
+            isLoading: false
+          }));
+        } catch (error) {
+          set({ error: (error as Error).message, isLoading: false });
+        }
+      },
+
+      deleteGapMatrixEntry: async (entryId) => {
+        const { currentOrg } = get();
+        if (!currentOrg) return;
+        set({ isLoading: true, error: null });
+        try {
+          await gapMatrixService.delete(currentOrg.id, entryId);
+          set((state) => ({
+            gapMatrixEntries: state.gapMatrixEntries.filter((entry) => entry.id !== entryId),
+            isLoading: false
+          }));
+        } catch (error) {
+          set({ error: (error as Error).message, isLoading: false });
+        }
+      },
+
+      bulkCloseLowPriority: async (minPriority = 4) => {
+        const { currentOrg } = get();
+        if (!currentOrg) return 0;
+        set({ isLoading: true, error: null });
+        try {
+          const priorities = new Set<number>();
+          for (let p = minPriority; p <= 5; p += 1) priorities.add(p);
+          const batches = await Promise.all(
+            Array.from(priorities).map((priority) =>
+              gapMatrixService.listForOrg(currentOrg.id, { priority })
+            )
+          );
+          const toClose = batches.flat().filter((entry) => entry.status !== 'closed');
+          await Promise.all(toClose.map((entry) => gapMatrixService.close(currentOrg.id, entry.id)));
+          const toCloseIds = new Set(toClose.map((entry) => entry.id));
+          set((state) => ({
+            gapMatrixEntries: state.gapMatrixEntries.map((entry) =>
+              toCloseIds.has(entry.id) ? { ...entry, status: 'closed' } : entry
+            ),
+            isLoading: false
+          }));
+          return toClose.length;
+        } catch (error) {
+          set({ error: (error as Error).message, isLoading: false });
+          return 0;
+        }
+      },
+
       loadReportSchedules: async () => {
         const { currentOrg } = get();
         if (!currentOrg) return;
@@ -1698,6 +1822,7 @@ export const useLMSStore = create<LMSState>()(
           competencyScores: [],
           competencyBadges: [],
           remediationAssignments: [],
+          gapMatrixEntries: [],
           reportSchedules: [],
           reportRuns: [],
           managerDigestRuns: [],

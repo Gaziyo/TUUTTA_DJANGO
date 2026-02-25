@@ -1,7 +1,7 @@
 import uuid
 from django.utils.text import slugify
 from rest_framework import serializers
-from .models import Course, CourseModule, Lesson
+from .models import Course, CourseModule, Lesson, AdaptiveReleaseRule
 
 
 class LessonSerializer(serializers.ModelSerializer):
@@ -22,7 +22,8 @@ class CourseModuleSerializer(serializers.ModelSerializer):
         model = CourseModule
         fields = [
             'id', 'course', 'title', 'description', 'order_index',
-            'is_required', 'estimated_duration', 'lessons', 'created_at', 'updated_at',
+            'is_required', 'estimated_duration', 'unlock_requires',
+            'lessons', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -53,3 +54,14 @@ class CourseDetailSerializer(CourseSerializer):
 
     class Meta(CourseSerializer.Meta):
         fields = CourseSerializer.Meta.fields + ['modules']
+
+
+class AdaptiveReleaseRuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdaptiveReleaseRule
+        fields = [
+            'id', 'course', 'module', 'rule_type', 'prerequisite_module',
+            'assessment', 'min_score', 'min_bloom_level',
+            'is_active', 'metadata', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

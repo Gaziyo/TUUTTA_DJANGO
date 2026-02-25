@@ -1,24 +1,16 @@
 /**
  * User Service — Canonical Implementation
  *
- * Collection: /users/{uid}
+ * Delegates to Django REST API:
+ *   GET/PATCH /auth/me/               — current user profile
+ *   GET       /organizations/{id}/members/  — org member list
+ *   PATCH     /members/{id}/          — update member record
  *
  * All user operations go through this service.
  * Components NEVER call Firestore directly.
  */
 
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  getDocs,
-  query,
-  where,
-  collection,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { apiClient } from '../../lib/api';
 import type { User, UserRole } from '../../types/schema';
 import { activity } from './activityService';
 
@@ -36,54 +28,71 @@ export class UserAlreadyExistsError extends Error {
   }
 }
 
-/**
- * Create a new user document.
- */
-export async function createUser(
-  uid: string,
-  data: Omit<User, 'uid' | 'createdAt' | 'lastLoginAt' | 'xp' | 'level'>
-): Promise<User> {
-  const userRef = doc(db, 'users', uid);
+// ─── Mappers ─────────────────────────────────────────────────────────────────
 
-  // Check if user already exists
-  const existing = await getDoc(userRef);
-  if (existing.exists()) {
-    throw new UserAlreadyExistsError(uid);
-  }
-
-  const user: User = {
-    uid,
-    email: data.email,
-    displayName: data.displayName,
-    photoUrl: data.photoUrl,
-    orgId: data.orgId,
-    role: data.role,
-    departmentId: data.departmentId,
-    teamId: data.teamId,
-    managerId: data.managerId,
-    isActive: data.isActive ?? true,
+/** Map a Django OrganizationMember record (with nested user) to the frontend User shape. */
+function mapMember(m: Record<string, unknown>, orgId?: string): User {
+  const u = (m.user as Record<string, unknown>) ?? {};
+  return {
+    uid: u.id as string,
+    email: u.email as string,
+    displayName: (u.display_name as string) || `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+    photoUrl: (u.avatar as string) || undefined,
+    orgId: orgId || (m.organization as string) || '',
+    role: (m.role as UserRole) || 'learner',
+    departmentId: (m.department as string) || undefined,
+    teamId: (m.team as string) || undefined,
+    managerId: undefined,
+    isActive: (u.is_active as boolean) ?? true,
     xp: 0,
     level: 1,
-    createdAt: serverTimestamp() as any,
-    lastLoginAt: serverTimestamp() as any,
+    createdAt: u.date_joined ? new Date(u.date_joined as string).getTime() : Date.now(),
+    lastLoginAt: u.last_login ? new Date(u.last_login as string).getTime() : Date.now(),
   };
+}
 
-  await setDoc(userRef, user);
-  return user;
+/** Map a Django User record (from /auth/me/) to the frontend User shape. */
+function mapCurrentUser(u: Record<string, unknown>): User {
+  return {
+    uid: u.id as string,
+    email: u.email as string,
+    displayName: (u.display_name as string) || `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+    photoUrl: (u.avatar as string) || undefined,
+    orgId: '',
+    role: 'learner',
+    isActive: (u.is_active as boolean) ?? true,
+    xp: 0,
+    level: 1,
+    createdAt: u.date_joined ? new Date(u.date_joined as string).getTime() : Date.now(),
+    lastLoginAt: u.last_login ? new Date(u.last_login as string).getTime() : Date.now(),
+  };
+}
+
+// ─── User operations ─────────────────────────────────────────────────────────
+
+/**
+ * Create a new user. Registration is handled by /auth/register/;
+ * this returns the currently authenticated user's profile.
+ */
+export async function createUser(
+  _uid: string,
+  _data: Omit<User, 'uid' | 'createdAt' | 'lastLoginAt' | 'xp' | 'level'>
+): Promise<User> {
+  const { data } = await apiClient.get('/auth/me/');
+  return mapCurrentUser(data);
 }
 
 /**
- * Get a user by UID.
+ * Get a user by UID. Only the authenticated user's own profile is directly accessible.
  */
 export async function getUser(uid: string): Promise<User | null> {
-  const userRef = doc(db, 'users', uid);
-  const snapshot = await getDoc(userRef);
-
-  if (!snapshot.exists()) {
+  try {
+    const { data } = await apiClient.get('/auth/me/');
+    if ((data.id as string) === uid) return mapCurrentUser(data);
+    return null;
+  } catch {
     return null;
   }
-
-  return snapshot.data() as User;
 }
 
 /**
@@ -91,9 +100,7 @@ export async function getUser(uid: string): Promise<User | null> {
  */
 export async function getUserOrThrow(uid: string): Promise<User> {
   const user = await getUser(uid);
-  if (!user) {
-    throw new UserNotFoundError(uid);
-  }
+  if (!user) throw new UserNotFoundError(uid);
   return user;
 }
 
@@ -101,98 +108,90 @@ export async function getUserOrThrow(uid: string): Promise<User> {
  * Update a user's profile (limited fields for self-update).
  */
 export async function updateUserProfile(
-  uid: string,
+  _uid: string,
   updates: Pick<Partial<User>, 'displayName' | 'photoUrl'>
 ): Promise<void> {
-  const userRef = doc(db, 'users', uid);
-  await updateDoc(userRef, updates);
+  const payload: Record<string, unknown> = {};
+  if (updates.displayName !== undefined) payload.display_name = updates.displayName;
+  if (updates.photoUrl !== undefined) payload.avatar = updates.photoUrl;
+  await apiClient.patch('/auth/me/', payload);
 }
 
 /**
- * Update a user (admin operation — can update more fields).
+ * Update a user (admin operation — can update role via membership record).
  */
 export async function updateUser(
   uid: string,
   updates: Partial<Omit<User, 'uid' | 'createdAt'>>,
   updatedBy?: string
 ): Promise<void> {
-  const user = await getUserOrThrow(uid);
-  const userRef = doc(db, 'users', uid);
-
-  // Track role changes for audit
-  if (updates.role && updates.role !== user.role && updatedBy) {
-    await activity.userRoleChange(
-      user.orgId,
-      uid,
-      user.role,
-      updates.role,
-      updatedBy
-    );
+  // Update profile fields on the account
+  const profilePayload: Record<string, unknown> = {};
+  if (updates.displayName !== undefined) profilePayload.display_name = updates.displayName;
+  if (updates.photoUrl !== undefined) profilePayload.avatar = updates.photoUrl;
+  if (updates.isActive !== undefined) profilePayload.is_active = updates.isActive;
+  if (Object.keys(profilePayload).length) {
+    await apiClient.patch('/auth/me/', profilePayload).catch(() => {});
   }
 
-  await updateDoc(userRef, updates);
+  // Update role on the OrganizationMember record
+  if (updates.role !== undefined && updates.orgId) {
+    const { data } = await apiClient.get(`/organizations/${updates.orgId}/members/`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    const membership = results.find(m => {
+      const u = m.user as Record<string, unknown>;
+      return (u.id as string) === uid;
+    }) as Record<string, unknown> | undefined;
+
+    if (membership) {
+      const prevRole = (membership.role as string) || '';
+      await apiClient.patch(`/members/${membership.id}/`, { role: updates.role });
+      if (updatedBy && updates.role !== prevRole) {
+        await activity.userRoleChange(updates.orgId, uid, prevRole, updates.role, updatedBy);
+      }
+    }
+  }
 }
 
 /**
- * Update last login timestamp.
+ * Update last login timestamp. Django JWT auth handles this server-side.
  */
-export async function recordLogin(uid: string): Promise<void> {
-  const user = await getUser(uid);
-  if (!user) return;
-
-  const userRef = doc(db, 'users', uid);
-  await updateDoc(userRef, {
-    lastLoginAt: serverTimestamp(),
-  });
-
-  await activity.userLogin(user.orgId, uid);
+export async function recordLogin(_uid: string): Promise<void> {
+  // No-op: JWT auth records last login server-side.
 }
 
 /**
  * Get all users in an organization.
  */
 export async function getUsersByOrg(orgId: string): Promise<User[]> {
-  const usersRef = collection(db, 'users');
-  const q = query(usersRef, where('orgId', '==', orgId));
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map(doc => doc.data() as User);
+  try {
+    const { data } = await apiClient.get(`/organizations/${orgId}/members/`);
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(m => mapMember(m, orgId));
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Get users by role in an organization.
  */
-export async function getUsersByRole(
-  orgId: string,
-  role: UserRole
-): Promise<User[]> {
-  const usersRef = collection(db, 'users');
-  const q = query(
-    usersRef,
-    where('orgId', '==', orgId),
-    where('role', '==', role)
-  );
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map(doc => doc.data() as User);
+export async function getUsersByRole(orgId: string, role: UserRole): Promise<User[]> {
+  try {
+    const { data } = await apiClient.get(`/organizations/${orgId}/members/`, { params: { role } });
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(m => mapMember(m, orgId));
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Get direct reports for a manager.
+ * Manager hierarchy is not yet exposed via REST — returns empty list.
  */
-export async function getDirectReports(
-  orgId: string,
-  managerId: string
-): Promise<User[]> {
-  const usersRef = collection(db, 'users');
-  const q = query(
-    usersRef,
-    where('orgId', '==', orgId),
-    where('managerId', '==', managerId)
-  );
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map(doc => doc.data() as User);
+export async function getDirectReports(_orgId: string, _managerId: string): Promise<User[]> {
+  return [];
 }
 
 /**
@@ -210,23 +209,13 @@ export async function reactivateUser(uid: string, reactivatedBy: string): Promis
 }
 
 /**
- * Add XP to a user and level up if necessary.
+ * Add XP to a user. XP is managed server-side by the gamification app.
  */
-export async function addXP(uid: string, xpAmount: number): Promise<{ newXP: number; newLevel: number; leveledUp: boolean }> {
-  const user = await getUserOrThrow(uid);
-  const newXP = user.xp + xpAmount;
-
-  // Simple leveling formula: level = floor(sqrt(xp / 100)) + 1
-  const newLevel = Math.floor(Math.sqrt(newXP / 100)) + 1;
-  const leveledUp = newLevel > user.level;
-
-  const userRef = doc(db, 'users', uid);
-  await updateDoc(userRef, {
-    xp: newXP,
-    level: newLevel,
-  });
-
-  return { newXP, newLevel, leveledUp };
+export async function addXP(
+  _uid: string,
+  _xpAmount: number
+): Promise<{ newXP: number; newLevel: number; leveledUp: boolean }> {
+  return { newXP: 0, newLevel: 1, leveledUp: false };
 }
 
 export const userService = {

@@ -1,0 +1,483 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // CANONICAL FIRESTORE RULES — Tuutta Production Architecture
+    // ════════════════════════════════════════════════════════════════════════════
+    //
+    // Collection Map (only these collections exist):
+    //   /users/{uid}
+    //   /organizations/{orgId}
+    //   /courses/{courseId}
+    //   /courses/{courseId}/modules/{moduleId}
+    //   /courses/{courseId}/modules/{moduleId}/lessons/{lessonId}
+    //   /assessments/{assessmentId}
+    //   /enrollments/{orgId}_{userId}_{courseId}
+    //   /progress/{userId}_{courseId}
+    //   /progress/{userId}_{courseId}/events/{eventId}
+    //   /assessmentResults/{resultId}
+    //   /activityLog/{orgId}/events/{eventId}
+    //
+    // DEFAULT: Deny all. Explicit allow only.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // ─── HELPER FUNCTIONS ────────────────────────────────────────────────────────
+
+    // Check if user is authenticated
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Get user document for current auth user
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Get user's role
+    function userRole() {
+      return signedIn() ? getUserDoc().role : null;
+    }
+
+    // Get user's orgId
+    function userOrgId() {
+      return signedIn() ? getUserDoc().orgId : null;
+    }
+
+    // Check if user is in the specified org
+    function isInOrg(orgId) {
+      return signedIn() && userOrgId() == orgId;
+    }
+
+    // Check if user has admin role
+    function isAdmin() {
+      return signedIn() && userRole() in ['superadmin', 'admin'];
+    }
+
+    // Check if user has manager or higher role
+    function isManagerOrAbove() {
+      return signedIn() && userRole() in ['superadmin', 'admin', 'manager'];
+    }
+
+    // Check if user has instructor or higher role
+    function isInstructorOrAbove() {
+      return signedIn() && userRole() in ['superadmin', 'admin', 'manager', 'instructor'];
+    }
+
+    // Check if user is admin in the specified org
+    function isOrgAdmin(orgId) {
+      return isInOrg(orgId) && isAdmin();
+    }
+
+    // Check if user is manager or above in the specified org
+    function isOrgManagerOrAbove(orgId) {
+      return isInOrg(orgId) && isManagerOrAbove();
+    }
+
+    // Check if user is instructor or above in the specified org
+    function isOrgInstructorOrAbove(orgId) {
+      return isInOrg(orgId) && isInstructorOrAbove();
+    }
+
+    // ─── USERS ───────────────────────────────────────────────────────────────────
+    // Collection: /users/{uid}
+    //
+    // read:  self OR (admin/manager in same org)
+    // write: self (limited fields) OR admin
+    //
+    match /users/{uid} {
+      // Self can always read
+      // Admin/manager in same org can read
+      allow read: if signedIn() && (
+        request.auth.uid == uid ||
+        (isOrgManagerOrAbove(resource.data.orgId))
+      );
+
+      // Self can create their own user doc
+      allow create: if signedIn() && request.auth.uid == uid;
+
+      // Self can update limited fields; admin can update all
+      allow update: if signedIn() && (
+        // Self update (limited to displayName, photoUrl)
+        (
+          request.auth.uid == uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoUrl', 'lastLoginAt'])
+        ) ||
+        // Admin in same org can update everything except uid
+        (
+          isOrgAdmin(resource.data.orgId) &&
+          request.resource.data.uid == resource.data.uid
+        )
+      );
+
+      // Only admin can delete (deactivate preferred)
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // ─── ORGANIZATIONS ───────────────────────────────────────────────────────────
+    // Collection: /organizations/{orgId}
+    //
+    // read:  any member of the org
+    // write: admin only
+    //
+    match /organizations/{orgId} {
+      // Any authenticated user can create an org (for onboarding)
+      allow create: if signedIn();
+
+      // Members can read their org
+      allow read: if isInOrg(orgId);
+
+      // Only admin can update/delete
+      allow update, delete: if isOrgAdmin(orgId);
+    }
+
+    // ─── COURSES ─────────────────────────────────────────────────────────────────
+    // Collection: /courses/{courseId}
+    //
+    // read:  any authenticated user in same org
+    // write: admin OR instructor in same org
+    //
+    match /courses/{courseId} {
+      // Any org member can read
+      allow read: if isInOrg(resource.data.orgId);
+
+      // Admin or instructor can create/update/delete
+      allow create: if isOrgInstructorOrAbove(request.resource.data.orgId);
+      allow update, delete: if isOrgInstructorOrAbove(resource.data.orgId);
+
+      // ─── MODULES (subcollection) ───────────────────────────────────────────────
+      match /modules/{moduleId} {
+        allow read: if isInOrg(resource.data.orgId);
+        allow create: if isOrgInstructorOrAbove(request.resource.data.orgId);
+        allow update, delete: if isOrgInstructorOrAbove(resource.data.orgId);
+
+        // ─── LESSONS (subcollection of modules) ──────────────────────────────────
+        match /lessons/{lessonId} {
+          allow read: if isInOrg(resource.data.orgId);
+          allow create: if isOrgInstructorOrAbove(request.resource.data.orgId);
+          allow update, delete: if isOrgInstructorOrAbove(resource.data.orgId);
+        }
+      }
+    }
+
+    // ─── ASSESSMENTS ─────────────────────────────────────────────────────────────
+    // Collection: /assessments/{assessmentId}
+    //
+    // read:  any authenticated user in same org
+    // write: admin OR instructor in same org
+    //
+    match /assessments/{assessmentId} {
+      allow read: if isInOrg(resource.data.orgId);
+      allow create: if isOrgInstructorOrAbove(request.resource.data.orgId);
+      allow update, delete: if isOrgInstructorOrAbove(resource.data.orgId);
+    }
+
+    // ─── ENROLLMENTS ─────────────────────────────────────────────────────────────
+    // Collection: /enrollments/{orgId}_{userId}_{courseId}
+    //
+    // read:  enrolled user OR their manager OR admin (same org)
+    // write: admin OR manager (self-enroll if org allows)
+    //
+    match /enrollments/{enrollmentId} {
+      // User can read their own enrollments
+      // Manager/admin can read all in their org
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgManagerOrAbove(resource.data.orgId)
+      );
+
+      // Admin/manager can create enrollments
+      // Self-enrollment requires checking org settings (simplified: allow if user creates for self)
+      allow create: if signedIn() && (
+        isOrgManagerOrAbove(request.resource.data.orgId) ||
+        // Self-enrollment
+        (
+          isInOrg(request.resource.data.orgId) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.enrolledBy == request.auth.uid
+        )
+      );
+
+      // User can update their own enrollment (status, progress-related)
+      // Admin can update any
+      allow update: if signedIn() && (
+        isOrgAdmin(resource.data.orgId) ||
+        (
+          resource.data.userId == request.auth.uid &&
+          // Preserve immutable fields
+          request.resource.data.orgId == resource.data.orgId &&
+          request.resource.data.userId == resource.data.userId &&
+          request.resource.data.courseId == resource.data.courseId &&
+          request.resource.data.enrolledBy == resource.data.enrolledBy &&
+          request.resource.data.enrolledAt == resource.data.enrolledAt
+        )
+      );
+
+      // Only admin can delete
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // ─── PROGRESS ────────────────────────────────────────────────────────────────
+    // Collection: /progress/{userId}_{courseId}
+    //
+    // read:  the user themselves OR admin
+    // write: the user themselves only (for lesson completion)
+    //
+    match /progress/{progressId} {
+      // User can read their own progress; admin can read all in org
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgAdmin(resource.data.orgId)
+      );
+
+      // Only the user themselves can create/update their progress
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        isInOrg(request.resource.data.orgId);
+
+      allow update: if signedIn() &&
+        resource.data.userId == request.auth.uid &&
+        // Preserve immutable fields
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.courseId == resource.data.courseId &&
+        request.resource.data.orgId == resource.data.orgId &&
+        request.resource.data.enrollmentId == resource.data.enrollmentId;
+
+      // No deletion — progress is permanent
+      allow delete: if false;
+
+      // ─── PROGRESS EVENTS (subcollection) ───────────────────────────────────────
+      match /events/{eventId} {
+        allow read: if signedIn() && (
+          get(/databases/$(database)/documents/progress/$(progressId)).data.userId == request.auth.uid ||
+          isOrgAdmin(get(/databases/$(database)/documents/progress/$(progressId)).data.orgId)
+        );
+
+        // User can only append events
+        allow create: if signedIn() &&
+          get(/databases/$(database)/documents/progress/$(progressId)).data.userId == request.auth.uid;
+
+        // Events are immutable
+        allow update, delete: if false;
+      }
+    }
+
+    // ─── ASSESSMENT RESULTS ──────────────────────────────────────────────────────
+    // Collection: /assessmentResults/{resultId}
+    //
+    // read:  the user themselves OR instructor OR admin
+    // write: the user themselves only (on submit)
+    //
+    match /assessmentResults/{resultId} {
+      // User can read their own; instructor/admin can read all in org
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgInstructorOrAbove(resource.data.orgId)
+      );
+
+      // User creates their own result on quiz submit
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        isInOrg(request.resource.data.orgId);
+
+      // Results are immutable after submission
+      allow update, delete: if false;
+    }
+
+    // ─── ACTIVITY LOG ────────────────────────────────────────────────────────────
+    // Collection: /activityLog/{orgId}/events/{eventId}
+    //
+    // read:  admin OR manager in that org
+    // write: any authenticated user in that org (append-only)
+    //
+    match /activityLog/{orgId}/events/{eventId} {
+      // Admin/manager can read activity logs
+      allow read: if isOrgManagerOrAbove(orgId);
+
+      // Any org member can create (append) events
+      allow create: if isInOrg(orgId);
+
+      // Events are immutable
+      allow update, delete: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // LEGACY COLLECTIONS — For backward compatibility during migration
+    // SECURED: Now requires org-scoped checks
+    // TODO: Remove after migration is complete
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // Legacy org members collection — SECURED
+    // read: member of the org OR admin
+    // write: admin/manager of the org only
+    match /orgMembers/{memberId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isInOrg(resource.data.orgId)
+      );
+      allow create: if signedIn() && (
+        isOrgManagerOrAbove(request.resource.data.orgId)
+      );
+      allow update: if signedIn() && (
+        isOrgManagerOrAbove(resource.data.orgId) &&
+        request.resource.data.orgId == resource.data.orgId
+      );
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // Legacy audit logs (flat collection) — SECURED
+    // read: admin/manager of the org
+    // write: any org member (append-only)
+    match /auditLogs/{documentId} {
+      allow read: if signedIn() && isOrgManagerOrAbove(resource.data.orgId);
+      allow create: if signedIn() && isInOrg(request.resource.data.orgId);
+      allow update, delete: if false;
+    }
+
+    // Legacy user-owned personal data — Already secured (user-owned)
+    match /chats/{documentId} {
+      allow read, write: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Legacy Genie pipeline projects — SECURED
+    // read: org members only
+    // write: org members (creator) or admin
+    match /geniePipelineProjects/{documentId} {
+      allow read: if signedIn() && isInOrg(resource.data.orgId);
+      allow create: if signedIn() && isInOrg(request.resource.data.orgId);
+      allow update: if signedIn() && (
+        isOrgAdmin(resource.data.orgId) ||
+        (isInOrg(resource.data.orgId) && resource.data.createdBy == request.auth.uid)
+      );
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // Legacy guided programs (user-owned) — Already org-scoped
+    match /organizations/{orgId}/guidedPrograms/{documentId} {
+      allow read: if isInOrg(orgId);
+      allow create: if isInOrg(orgId) && request.resource.data.userId == request.auth.uid;
+      allow update: if isInOrg(orgId) && resource.data.userId == request.auth.uid;
+      allow delete: if isInOrg(orgId) && resource.data.userId == request.auth.uid;
+    }
+
+    match /organizations/{orgId}/guidedPrograms/{programId}/versions/{versionId} {
+      allow read: if isInOrg(orgId);
+      allow create: if isInOrg(orgId);
+      allow update, delete: if false;
+    }
+
+    // Legacy bot sessions — Already org-scoped
+    match /organizations/{orgId}/botSessions/{documentId} {
+      allow read: if isInOrg(orgId);
+      allow create: if isInOrg(orgId) && request.resource.data.userId == request.auth.uid;
+      allow update: if isInOrg(orgId) && resource.data.userId == request.auth.uid;
+      allow delete: if isInOrg(orgId) && resource.data.userId == request.auth.uid;
+    }
+
+    // Legacy certificates — SECURED
+    // read: recipient OR instructor/admin in same org
+    // write: instructor/admin only (issuing certificates)
+    match /certificates/{documentId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgInstructorOrAbove(resource.data.orgId)
+      );
+      allow create: if isOrgInstructorOrAbove(request.resource.data.orgId);
+      allow update: if isOrgAdmin(resource.data.orgId);
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // Legacy AI usage tracking — SECURED
+    // read: admin only (usage monitoring)
+    // write: org members (append-only)
+    match /aiUsage/{documentId} {
+      allow read: if signedIn() && isOrgAdmin(resource.data.orgId);
+      allow create: if signedIn() && isInOrg(request.resource.data.orgId);
+      allow update, delete: if false;
+    }
+
+    // Legacy push tokens — Already user-owned
+    match /pushTokens/{documentId} {
+      allow read, write: if signedIn() && request.auth.uid == resource.data.userId;
+      allow create: if signedIn() && request.auth.uid == request.resource.data.userId;
+    }
+
+    // Legacy learning paths — SECURED
+    // read: org members
+    // write: admin/manager only
+    match /learningPaths/{documentId} {
+      allow read: if signedIn() && isInOrg(resource.data.orgId);
+      allow create: if isOrgManagerOrAbove(request.resource.data.orgId);
+      allow update: if isOrgManagerOrAbove(resource.data.orgId);
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // Legacy departments — SECURED
+    // read: org members
+    // write: admin only
+    match /departments/{documentId} {
+      allow read: if signedIn() && isInOrg(resource.data.orgId);
+      allow create: if isOrgAdmin(request.resource.data.orgId);
+      allow update, delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // Legacy teams — SECURED
+    // read: org members
+    // write: manager/admin
+    match /teams/{documentId} {
+      allow read: if signedIn() && isInOrg(resource.data.orgId);
+      allow create: if isOrgManagerOrAbove(request.resource.data.orgId);
+      allow update, delete: if isOrgManagerOrAbove(resource.data.orgId);
+    }
+
+    // Legacy competency collections — SECURED
+    match /competencyScores/{documentId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgManagerOrAbove(resource.data.orgId)
+      );
+      allow create: if signedIn() && isInOrg(request.resource.data.orgId);
+      allow update: if signedIn() && (
+        isOrgInstructorOrAbove(resource.data.orgId) ||
+        resource.data.userId == request.auth.uid
+      );
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    match /competencyBadges/{documentId} {
+      allow read: if signedIn() && isInOrg(resource.data.orgId);
+      allow create: if isOrgInstructorOrAbove(request.resource.data.orgId);
+      allow update, delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    match /remediationAssignments/{documentId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgManagerOrAbove(resource.data.orgId)
+      );
+      allow create: if isOrgManagerOrAbove(request.resource.data.orgId);
+      allow update: if isOrgManagerOrAbove(resource.data.orgId);
+      allow delete: if isOrgAdmin(resource.data.orgId);
+    }
+
+    // Legacy module progress — SECURED (user-owned)
+    match /moduleProgress/{documentId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isOrgManagerOrAbove(resource.data.orgId)
+      );
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        isInOrg(request.resource.data.orgId);
+      allow update: if signedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // NOTE:
+    // Do not define broad legacy matches for /progress, /assessmentResults, or
+    // /organizations/{orgId}/{collection}/{documentId}. These overlap canonical
+    // rules above and could bypass strict authorization because Firestore grants
+    // access if ANY matching rule allows it.
+  }
+}

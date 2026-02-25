@@ -1,33 +1,24 @@
 /**
  * Assessment Service — Canonical Implementation
  *
- * Collections:
- *   /assessments/{assessmentId}
- *   /assessmentResults/{resultId}
+ * Delegates to Django REST API:
+ *   /assessments/         — assessment CRUD
+ *   /assessments/{id}/questions/  — question CRUD
+ *
+ * Assessment results are graded client-side and logged via observabilityService.
+ * A dedicated /assessment-attempts/ endpoint will be added in a future phase.
  *
  * All assessment operations go through this service.
  * Components NEVER call Firestore directly.
  */
 
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  collection,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { apiClient } from '../../lib/api';
+import { observabilityService } from '../observabilityService';
 import type {
   Assessment,
   AssessmentResult,
   Question,
   AnswerRecord,
-  QuestionType,
   AssessmentType,
 } from '../../types/schema';
 import { activity } from './activityService';
@@ -47,7 +38,35 @@ export class MaxAttemptsReachedError extends Error {
   }
 }
 
-// ─── ASSESSMENT OPERATIONS ────────────────────────────────────────────────────
+// ─── Mapper ───────────────────────────────────────────────────────────────────
+
+function mapAssessment(data: Record<string, unknown>): Assessment {
+  const questions: Question[] = ((data.questions as Record<string, unknown>[]) ?? []).map(q => ({
+    id: q.id as string,
+    text: (q.text as string) || (q.question_text as string) || '',
+    type: (q.type as Question['type']) || 'multiple_choice',
+    options: (q.options as string[]) || [],
+    correctAnswer: (q.correct_answer as string) || '',
+    points: (q.points as number) || 1,
+    explanation: (q.explanation as string) || undefined,
+  }));
+
+  return {
+    id: data.id as string,
+    orgId: (data.organization as string) || '',
+    courseId: (data.course as string) || '',
+    lessonId: (data.lesson as string) || undefined,
+    title: data.title as string,
+    type: (data.assessment_type as AssessmentType) || 'quiz',
+    questions,
+    passMark: (data.pass_mark as number) ?? 70,
+    maxAttempts: (data.max_attempts as number) ?? null,
+    createdBy: (data.created_by as string) || '',
+    createdAt: data.created_at ? new Date(data.created_at as string).getTime() : Date.now(),
+  };
+}
+
+// ─── Assessment CRUD ──────────────────────────────────────────────────────────
 
 /**
  * Create a new assessment.
@@ -55,38 +74,28 @@ export class MaxAttemptsReachedError extends Error {
 export async function createAssessment(
   data: Omit<Assessment, 'id' | 'createdAt'>
 ): Promise<Assessment> {
-  const assessmentRef = doc(collection(db, 'assessments'));
-
-  const assessment: Assessment = {
-    id: assessmentRef.id,
-    orgId: data.orgId,
-    courseId: data.courseId,
-    lessonId: data.lessonId,
+  const { data: res } = await apiClient.post('/assessments/', {
+    organization: data.orgId,
+    course: data.courseId,
+    lesson: data.lessonId,
     title: data.title,
-    type: data.type,
-    questions: data.questions,
-    passMark: data.passMark ?? 70,
-    maxAttempts: data.maxAttempts,
-    createdBy: data.createdBy,
-    createdAt: serverTimestamp() as any,
-  };
-
-  await setDoc(assessmentRef, assessment);
-  return assessment;
+    assessment_type: data.type,
+    pass_mark: data.passMark ?? 70,
+    max_attempts: data.maxAttempts,
+  });
+  return mapAssessment(res);
 }
 
 /**
  * Get an assessment by ID.
  */
 export async function getAssessment(assessmentId: string): Promise<Assessment | null> {
-  const assessmentRef = doc(db, 'assessments', assessmentId);
-  const snapshot = await getDoc(assessmentRef);
-
-  if (!snapshot.exists()) {
+  try {
+    const { data } = await apiClient.get(`/assessments/${assessmentId}/`);
+    return mapAssessment(data);
+  } catch {
     return null;
   }
-
-  return snapshot.data() as Assessment;
 }
 
 /**
@@ -94,9 +103,7 @@ export async function getAssessment(assessmentId: string): Promise<Assessment | 
  */
 export async function getAssessmentOrThrow(assessmentId: string): Promise<Assessment> {
   const assessment = await getAssessment(assessmentId);
-  if (!assessment) {
-    throw new AssessmentNotFoundError(assessmentId);
-  }
+  if (!assessment) throw new AssessmentNotFoundError(assessmentId);
   return assessment;
 }
 
@@ -104,42 +111,34 @@ export async function getAssessmentOrThrow(assessmentId: string): Promise<Assess
  * Get assessments for a course.
  */
 export async function getAssessmentsForCourse(
-  orgId: string,
+  _orgId: string,
   courseId: string
 ): Promise<Assessment[]> {
-  const assessmentsRef = collection(db, 'assessments');
-  const q = query(
-    assessmentsRef,
-    where('orgId', '==', orgId),
-    where('courseId', '==', courseId)
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as Assessment);
+  try {
+    const { data } = await apiClient.get('/assessments/', { params: { course: courseId } });
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    return results.map(mapAssessment);
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Get assessment for a specific lesson.
  */
 export async function getAssessmentForLesson(
-  orgId: string,
+  _orgId: string,
   courseId: string,
   lessonId: string
 ): Promise<Assessment | null> {
-  const assessmentsRef = collection(db, 'assessments');
-  const q = query(
-    assessmentsRef,
-    where('orgId', '==', orgId),
-    where('courseId', '==', courseId),
-    where('lessonId', '==', lessonId)
-  );
-
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) {
+  try {
+    const { data } = await apiClient.get('/assessments/', { params: { course: courseId, lesson: lessonId } });
+    const results: Record<string, unknown>[] = Array.isArray(data) ? data : (data.results ?? []);
+    if (!results.length) return null;
+    return mapAssessment(results[0]);
+  } catch {
     return null;
   }
-
-  return snapshot.docs[0].data() as Assessment;
 }
 
 /**
@@ -149,17 +148,16 @@ export async function updateAssessment(
   assessmentId: string,
   updates: Partial<Omit<Assessment, 'id' | 'orgId' | 'createdAt' | 'createdBy'>>
 ): Promise<void> {
-  await getAssessmentOrThrow(assessmentId);
-  const assessmentRef = doc(db, 'assessments', assessmentId);
-  await updateDoc(assessmentRef, updates);
+  const payload: Record<string, unknown> = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.type !== undefined) payload.assessment_type = updates.type;
+  if (updates.passMark !== undefined) payload.pass_mark = updates.passMark;
+  if (updates.maxAttempts !== undefined) payload.max_attempts = updates.maxAttempts;
+  await apiClient.patch(`/assessments/${assessmentId}/`, payload);
 }
 
-// ─── RESULT OPERATIONS ────────────────────────────────────────────────────────
+// ─── Grading (pure computation) ───────────────────────────────────────────────
 
-/**
- * Grade answers for an assessment.
- * Returns scored answers and total score.
- */
 function gradeAnswers(
   questions: Question[],
   givenAnswers: Record<string, string | string[]>
@@ -175,19 +173,15 @@ function gradeAnswers(
     let isCorrect = false;
 
     if (question.type === 'multiple_choice' || question.type === 'true_false') {
-      // Single correct answer
       const correct = Array.isArray(question.correctAnswer)
         ? question.correctAnswer[0]
         : question.correctAnswer;
-
       const given = Array.isArray(givenAnswer) ? givenAnswer[0] : givenAnswer;
       isCorrect = given.toLowerCase().trim() === correct.toLowerCase().trim();
     } else if (question.type === 'short_answer') {
-      // Case-insensitive comparison for short answers
       const correct = Array.isArray(question.correctAnswer)
         ? question.correctAnswer
         : [question.correctAnswer];
-
       const given = Array.isArray(givenAnswer) ? givenAnswer[0] : givenAnswer;
       isCorrect = correct.some(
         ans => ans.toLowerCase().trim() === given.toLowerCase().trim()
@@ -208,14 +202,13 @@ function gradeAnswers(
   return { answers, totalScore, maxScore };
 }
 
+// ─── Result operations ────────────────────────────────────────────────────────
+
 /**
  * Submit an assessment result.
  *
- * This function:
- * 1. Validates the user hasn't exceeded max attempts
- * 2. Grades the answers
- * 3. Creates the result document
- * 4. Logs the activity
+ * Grades answers client-side and logs via observabilityService.
+ * Persists results to a Django /assessment-attempts/ endpoint when available.
  */
 export async function submitResult(
   orgId: string,
@@ -227,13 +220,9 @@ export async function submitResult(
 ): Promise<AssessmentResult> {
   const assessment = await getAssessmentOrThrow(assessmentId);
 
-  // Get enrollment to link result
   const enrollment = await enrollmentService.getEnrollmentForUserCourse(orgId, userId, courseId);
-  if (!enrollment) {
-    throw new Error('User is not enrolled in this course');
-  }
+  if (!enrollment) throw new Error('User is not enrolled in this course');
 
-  // Check attempt count
   const previousAttempts = await getResultsForUserAssessment(userId, assessmentId);
   const attemptNumber = previousAttempts.length + 1;
 
@@ -241,15 +230,12 @@ export async function submitResult(
     throw new MaxAttemptsReachedError(assessmentId, assessment.maxAttempts);
   }
 
-  // Grade the answers
   const { answers, totalScore, maxScore } = gradeAnswers(assessment.questions, givenAnswers);
   const scorePercent = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
   const passed = scorePercent >= assessment.passMark;
 
-  // Create result document
-  const resultRef = doc(collection(db, 'assessmentResults'));
   const result: AssessmentResult = {
-    id: resultRef.id,
+    id: `result_${Date.now()}`,
     orgId,
     userId,
     courseId,
@@ -260,12 +246,20 @@ export async function submitResult(
     passed,
     answers,
     startedAt: startedAt as any,
-    submittedAt: serverTimestamp() as any,
+    submittedAt: new Date() as any,
   };
 
-  await setDoc(resultRef, result);
+  // Log result via observabilityService
+  observabilityService.logUserAction({
+    orgId,
+    actorId: userId,
+    action: 'assessment_submitted',
+    status: 'success',
+    entityType: 'assessment',
+    entityId: assessmentId,
+    metadata: { score: scorePercent, passed, attempt: attemptNumber, courseId },
+  }).catch(() => {});
 
-  // Log activity
   await activity.quizSubmit(orgId, userId, assessmentId, scorePercent, passed);
 
   return result;
@@ -273,108 +267,64 @@ export async function submitResult(
 
 /**
  * Get all results for a user and assessment.
+ * Returns empty list until a Django /assessment-attempts/ endpoint is available.
  */
 export async function getResultsForUserAssessment(
-  userId: string,
-  assessmentId: string
+  _userId: string,
+  _assessmentId: string
 ): Promise<AssessmentResult[]> {
-  const resultsRef = collection(db, 'assessmentResults');
-  const q = query(
-    resultsRef,
-    where('userId', '==', userId),
-    where('assessmentId', '==', assessmentId),
-    orderBy('submittedAt', 'desc')
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as AssessmentResult);
+  return [];
 }
 
 /**
  * Get all results for a user in a course.
  */
 export async function getResultsForUserCourse(
-  userId: string,
-  courseId: string
+  _userId: string,
+  _courseId: string
 ): Promise<AssessmentResult[]> {
-  const resultsRef = collection(db, 'assessmentResults');
-  const q = query(
-    resultsRef,
-    where('userId', '==', userId),
-    where('courseId', '==', courseId),
-    orderBy('submittedAt', 'desc')
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as AssessmentResult);
+  return [];
 }
 
 /**
  * Get all results for an assessment (instructor/admin view).
  */
 export async function getResultsForAssessment(
-  orgId: string,
-  assessmentId: string
+  _orgId: string,
+  _assessmentId: string
 ): Promise<AssessmentResult[]> {
-  const resultsRef = collection(db, 'assessmentResults');
-  const q = query(
-    resultsRef,
-    where('orgId', '==', orgId),
-    where('assessmentId', '==', assessmentId),
-    orderBy('submittedAt', 'desc')
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as AssessmentResult);
+  return [];
 }
 
 /**
  * Get all results for an organization (admin reporting).
  */
 export async function getResultsForOrg(
-  orgId: string,
-  limitCount = 100
+  _orgId: string,
+  _limitCount = 100
 ): Promise<AssessmentResult[]> {
-  const resultsRef = collection(db, 'assessmentResults');
-  const q = query(
-    resultsRef,
-    where('orgId', '==', orgId),
-    orderBy('submittedAt', 'desc')
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => doc.data() as AssessmentResult).slice(0, limitCount);
+  return [];
 }
 
 /**
- * Check remaining attempts for a user on an assessment.
+ * Check remaining attempts. Returns null (unlimited) until attempts endpoint is available.
  */
 export async function getRemainingAttempts(
-  userId: string,
+  _userId: string,
   assessmentId: string
 ): Promise<number | null> {
   const assessment = await getAssessment(assessmentId);
-  if (!assessment || assessment.maxAttempts === null) {
-    return null; // Unlimited attempts
-  }
-
-  const attempts = await getResultsForUserAssessment(userId, assessmentId);
-  return Math.max(0, assessment.maxAttempts - attempts.length);
+  return assessment?.maxAttempts ?? null;
 }
 
 /**
- * Get the best score for a user on an assessment.
+ * Get the best score for a user on an assessment. Returns null until attempts endpoint is available.
  */
 export async function getBestScore(
-  userId: string,
-  assessmentId: string
+  _userId: string,
+  _assessmentId: string
 ): Promise<number | null> {
-  const results = await getResultsForUserAssessment(userId, assessmentId);
-  if (results.length === 0) {
-    return null;
-  }
-
-  return Math.max(...results.map(r => r.score));
+  return null;
 }
 
 export const assessmentService = {

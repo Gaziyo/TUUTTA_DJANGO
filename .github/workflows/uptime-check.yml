@@ -1,0 +1,24 @@
+name: Uptime Check
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  uptime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run uptime and observability checks
+        env:
+          UPTIME_URLS: ${{ vars.UPTIME_URLS }}
+          VITE_STATUS_PAGE_URL: ${{ vars.VITE_STATUS_PAGE_URL }}
+          VITE_STATUS_BADGE_URL: ${{ vars.VITE_STATUS_BADGE_URL }}
+        run: node scripts/observability-check.mjs

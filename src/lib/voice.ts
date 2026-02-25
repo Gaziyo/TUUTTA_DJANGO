@@ -1,6 +1,5 @@
 import WaveSurfer from 'wavesurfer.js';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase';
+import { apiClient } from './api';
 import { logger } from './logger';
 
 export class VoiceRecorder {
@@ -325,21 +324,15 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
       );
     }
 
-    const base64Audio = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1] || '';
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(audioBlob);
+    const extension = (audioBlob.type.split('/')[1]?.split(';')[0] || 'webm').replace('mpeg', 'mp3');
+    const formData = new FormData();
+    formData.append('audio', audioBlob, `recording.${extension}`);
+
+    const { data } = await apiClient.post('/ai/transcribe/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
 
-    const call = httpsCallable(functions, 'genieTranscribeAudio');
-    const result = await call({ base64Audio, mimeType: audioBlob.type || 'audio/webm' });
-    const text = (result.data as { text?: string })?.text;
-
+    const text = (data as { transcript?: string })?.transcript;
     if (!text?.trim()) {
       throw new Error('No speech detected. Please try speaking more clearly');
     }

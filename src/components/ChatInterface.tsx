@@ -15,9 +15,11 @@ import 'katex/dist/katex.min.css';
 
 interface ChatInterfaceProps {
   variant?: 'default' | 'floating';
+  contextInfo?: string;
+  focusAreas?: string[];
 }
 
-const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
+const ChatInterface = ({ variant = 'default', contextInfo, focusAreas }: ChatInterfaceProps) => {
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -91,6 +93,12 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
     addMessage(userMessage);
     setInput('');
     setError(null);
+    const focusText = focusAreas && focusAreas.length > 0
+      ? `\n\nFocus areas to reinforce: ${focusAreas.join(', ')}.`
+      : '';
+    const contextText = contextInfo ? `\n\nContext:\n${contextInfo}` : '';
+    const contextualInput = `${trimmedInput}${focusText}${contextText}`;
+    const messageForAI = { role: 'user' as const, content: contextualInput };
 
     const urlRegex = /(https?:\/\/[^\s]+)/;
     const urlMatch = trimmedInput.match(urlRegex);
@@ -102,7 +110,7 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
       // ... Assessment Logic (Keep existing) ...
       setLoadingStatus('generating');
       try {
-        const assessment = await generateAssessment(input, '', '', 'general', 5);
+        const assessment = await generateAssessment(contextualInput, '', '', 'general', 5);
         if (assessment) {
           let assessmentString = "";
           assessment.questions.forEach((question, index) => {
@@ -121,7 +129,7 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
       // ... Globe Button Logic (Keep existing) ...
       setLoadingStatus('searching');
       try {
-        const currentMessages = [...(currentChat?.messages ?? []), userMessage];
+        const currentMessages = [...(currentChat?.messages ?? []), messageForAI];
         const response = await generateTutorResponse(currentMessages, files, true);
         if (response) {
           addMessage({ role: 'assistant', content: response });
@@ -160,7 +168,7 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
           const finalContentForAI = `Based on the following content from ${potentialUrl}:\n\n"""\n${scrapedText}\n"""\n\nPlease answer this question: ${questionText}`;
           // ... (Truncation logic if needed) ...
 
-          const messageToSendToAI = { role: 'user' as const, content: finalContentForAI };
+          const messageToSendToAI = { role: 'user' as const, content: `${finalContentForAI}${focusText}${contextText}` };
           const history = currentChat?.messages ?? [];
           const historyWithoutLast = history.length > 0 && history[history.length - 1].role === 'user' ? history.slice(0, -1) : history;
           const messagesForAI = [...historyWithoutLast, messageToSendToAI];
@@ -189,7 +197,7 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
         // ... Regular Chat Logic ...
         setLoadingStatus('sending');
         try {
-          const currentMessages = [...(currentChat?.messages ?? []), userMessage];
+          const currentMessages = [...(currentChat?.messages ?? []), messageForAI];
           const response = await generateTutorResponse(currentMessages, files, false);
           if (response) {
             addMessage({ role: 'assistant', content: response });
@@ -365,7 +373,14 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
                   {loadingStatus === 'generating' && 'Generating assessment...'}
                   {loadingStatus === 'uploading' && 'Uploading file...'}
                 </span>
-                <button onClick={handleCancel} className="p-1.5 hover:text-red-500 transition-colors"><X className="h-4 w-4" /></button>
+                <button
+                  onClick={handleCancel}
+                  aria-label="Cancel request"
+                  title="Cancel"
+                  className="p-1.5 hover:text-red-500 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -393,6 +408,7 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
             onChange={handleFileUpload}
             className="hidden"
             accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
+            aria-label="Upload file"
           />
 
           {/* Plus button with dropdown menu */}
@@ -405,6 +421,7 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
                 : 'bg-white/70 text-gray-600 hover:bg-white/90 hover:text-[#766edd] border border-gray-200'
                 } ${loadingStatus ? 'opacity-50 cursor-not-allowed' : ''} backdrop-blur-md shadow-sm`}
               title="More options"
+              aria-label="More input options"
             >
               <Plus className={`h-5 w-5 transition-transform duration-200 ${showInputOptions ? 'rotate-45' : ''}`} />
             </button>
@@ -482,6 +499,8 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask a question..."
+            aria-label="Chat message"
+            title="Chat message"
             disabled={!!loadingStatus}
             className="input-compact flex-1 text-sm min-w-0"
             onKeyPress={(e) => e.key === 'Enter' && handleSend(false)}
@@ -491,6 +510,8 @@ const ChatInterface = ({ variant = 'default' }: ChatInterfaceProps) => {
           <button
             onClick={() => handleSend(false)}
             disabled={!input.trim()}
+            aria-label="Send message"
+            title="Send message"
             className={`flex-shrink-0 button-primary p-2.5 ${!input.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Send className="h-4 w-4" />

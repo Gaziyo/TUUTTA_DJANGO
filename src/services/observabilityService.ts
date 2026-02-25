@@ -1,5 +1,3 @@
-import { collection, doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { serviceEvents } from './events';
 import { auditService } from './auditService';
 import type { AuditLog } from '../types/lms';
@@ -35,8 +33,6 @@ type ObservabilityRecord = StructuredLogInput & {
   createdAt: number;
 };
 
-const OBS_COLLECTION = 'observabilityLogs';
-
 function trimUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(
     Object.entries(value).filter(([, v]) => v !== undefined)
@@ -53,12 +49,10 @@ function makeRecord(input: StructuredLogInput, id: string): ObservabilityRecord 
   };
 }
 
-async function persist(record: ObservabilityRecord): Promise<void> {
-  const collectionRef = record.orgId
-    ? collection(db, 'organizations', record.orgId, OBS_COLLECTION)
-    : collection(db, OBS_COLLECTION);
-  const recordRef = doc(collectionRef, record.id);
-  await setDoc(recordRef, trimUndefined(record));
+// Firebase removed — persistence is a no-op during Django migration.
+// TODO: wire up to Django audit/observability endpoint.
+async function persist(_record: ObservabilityRecord): Promise<void> {
+  // no-op
 }
 
 async function safePersist(input: StructuredLogInput): Promise<void> {
@@ -69,7 +63,7 @@ async function safePersist(input: StructuredLogInput): Promise<void> {
   } catch {
     // Keep product flow resilient when observability infrastructure is unavailable.
   }
-  serviceEvents.emit(`observability.${input.category}.${input.action}`, trimUndefined(record));
+  serviceEvents.emit(`observability.${input.category}.${input.action}`, trimUndefined(record as unknown as Record<string, unknown>));
 }
 
 export const observabilityService = {

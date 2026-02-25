@@ -2,11 +2,13 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
-from .models import Course, CourseModule, Lesson
+from .models import Course, CourseModule, Lesson, AdaptiveReleaseRule
 from .serializers import (
     CourseSerializer, CourseDetailSerializer,
     CourseModuleSerializer, LessonSerializer,
+    AdaptiveReleaseRuleSerializer,
 )
+from .services import get_module_unlock_status
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -57,6 +59,12 @@ class CourseModuleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(course_id=self.kwargs['course_pk'])
 
+    @action(detail=True, methods=['get'], url_path='unlock-status')
+    def unlock_status(self, request, course_pk=None, pk=None):
+        module = self.get_object()
+        unlocked, reasons = get_module_unlock_status(request.user, module)
+        return Response({'unlocked': unlocked, 'reasons': reasons})
+
 
 class LessonViewSet(viewsets.ModelViewSet):
     serializer_class = LessonSerializer
@@ -68,3 +76,18 @@ class LessonViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(module_id=self.kwargs['module_pk'])
+
+
+class AdaptiveReleaseRuleViewSet(viewsets.ModelViewSet):
+    serializer_class = AdaptiveReleaseRuleSerializer
+
+    def get_queryset(self):
+        course_id = self.kwargs.get('course_pk') or self.request.query_params.get('course')
+        qs = AdaptiveReleaseRule.objects.select_related('course', 'module')
+        if course_id:
+            qs = qs.filter(course_id=course_id)
+        return qs
+
+    def perform_create(self, serializer):
+        course_id = self.kwargs.get('course_pk') or self.request.data.get('course')
+        serializer.save(course_id=course_id)

@@ -14,8 +14,7 @@ import {
 } from 'lucide-react';
 import { useGeniePipeline, PipelineStage, PIPELINE_STAGES } from '../../../context/GeniePipelineContext';
 import { useLMSStore } from '../../../store/lmsStore';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../../lib/firebase';
+import { apiClient } from '../../../lib/api';
 import { transcribeAudio } from '../../../lib/voice';
 import { SpeechSynthesizer } from '../../../lib/speech';
 import './animations.css';
@@ -165,7 +164,6 @@ const VoiceWave: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => (
       <div
         key={i}
         className={`w-1 rounded-full ${isDarkMode ? 'bg-red-400' : 'bg-red-500'} genie-voice-bar`}
-        style={{ animationDelay: `${i * 0.1}s` }}
       />
     ))}
   </div>
@@ -199,6 +197,8 @@ const SuggestedPrompts: React.FC<{
         </span>
         <button
           onClick={() => setIsExpanded(false)}
+          aria-label="Hide suggested prompts"
+          title="Hide suggested prompts"
           className={`p-0.5 rounded ${isDarkMode ? 'hover:bg-gray-800 text-gray-500' : 'hover:bg-gray-200 text-gray-400'}`}
         >
           <X className="w-3 h-3" />
@@ -240,7 +240,6 @@ export default function CopilotSidebar({ isDarkMode, onClose, counts }: CopilotS
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const speechRef = useRef<SpeechSynthesizer | null>(null);
-  const chatCompletion = httpsCallable(functions, 'genieChatCompletion');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const guidance = STAGE_GUIDANCE[currentStage];
@@ -335,16 +334,15 @@ export default function CopilotSidebar({ isDarkMode, onClose, counts }: CopilotS
       const systemPrompt = `You are Genie, an AI co-pilot for the Tuutta learning platform. You're helping with the ${currentStage} stage. Be concise and actionable.`;
       const userPrompt = `Stage: ${currentStage}\nProject: ${project?.name || 'Untitled'}\nUser: ${content}\n\nRespond in 2-3 short sentences.`;
 
-      const result = await chatCompletion({
-        systemPrompt,
-        userPrompt,
-        temperature: 0.3,
-        maxTokens: 150,
-        orgId: currentOrg?.id
+      const { data: chatData } = await apiClient.post('/ai/chat/', {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        model: 'gpt-4o-mini',
       });
 
-      const payload = result.data as { content?: string };
-      const reply = payload.content || 'I can help you with that. What would you like to know?';
+      const reply = (chatData as { content?: string })?.content || 'I can help you with that. What would you like to know?';
 
       const assistantMessage = {
         id: `msg_${Date.now()}`,
@@ -444,6 +442,7 @@ export default function CopilotSidebar({ isDarkMode, onClose, counts }: CopilotS
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
+            aria-label={isExpanded ? 'Collapse co-pilot sidebar' : 'Expand co-pilot sidebar'}
             className={`p-1.5 rounded-lg text-xs transition-colors ${
               isDarkMode
                 ? 'hover:bg-gray-800 text-gray-400'
@@ -627,6 +626,7 @@ export default function CopilotSidebar({ isDarkMode, onClose, counts }: CopilotS
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendChat()}
             placeholder="Ask the co-pilot..."
+            aria-label="Copilot message"
             disabled={isRecording}
             className={`flex-1 px-3 py-2 rounded-lg text-xs border transition-colors ${
               isDarkMode
@@ -636,6 +636,8 @@ export default function CopilotSidebar({ isDarkMode, onClose, counts }: CopilotS
           />
           <button
             onClick={isRecording ? stopRecording : startRecording}
+            aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+            title={isRecording ? 'Stop recording' : 'Start recording'}
             className={`p-2 rounded-lg transition-all duration-200 genie-btn-press ${
               isRecording
                 ? 'bg-red-500 text-white animate-pulse'
@@ -649,6 +651,8 @@ export default function CopilotSidebar({ isDarkMode, onClose, counts }: CopilotS
           <button
             onClick={() => sendChat()}
             disabled={isSending || !chatInput.trim() || isRecording}
+            aria-label="Send message"
+            title="Send message"
             className={`p-2 rounded-lg transition-all duration-200 genie-btn-press ${
               isSending || !chatInput.trim() || isRecording
                 ? isDarkMode

@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useLMSStore } from '../store/lmsStore';
+import { gapMatrixService } from '../services';
+import type { GapMatrixEntry } from '../services/gapMatrixService';
 
 interface MyCoursesPageProps {
   isDarkMode: boolean;
@@ -36,13 +38,19 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [showFilters, setShowFilters] = useState(false);
+  const [gapEntries, setGapEntries] = useState<GapMatrixEntry[]>([]);
 
   useEffect(() => {
     if (currentOrg) {
       loadCourses();
       loadEnrollments();
+      if (currentMember?.id) {
+        gapMatrixService.listForUser(currentOrg.id, currentMember.id).then(setGapEntries);
+      } else {
+        gapMatrixService.listForOrg(currentOrg.id).then(setGapEntries);
+      }
     }
-  }, [currentOrg, loadCourses, loadEnrollments]);
+  }, [currentOrg, currentMember?.id, loadCourses, loadEnrollments]);
 
   const userEnrollments = useMemo(() => {
     if (!currentMember) return [];
@@ -53,8 +61,11 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
     return userEnrollments.map(enrollment => {
       const course = courses.find(c => c.id === enrollment.courseId);
       if (!course) return null;
+      const gapEntry = gapEntries.find(entry => entry.recommendedCourseId === course.id);
       const totalLessons = course.modules.reduce((sum, module) => sum + module.lessons.length, 0);
       const durationHours = Math.max(1, Math.round(course.estimatedDuration / 60));
+      const gapScore = gapEntry?.gapScore ?? null;
+      const gapClosure = gapScore !== null ? Math.round((1 - gapScore) * 100) : null;
       return {
         id: course.id,
         name: course.title,
@@ -65,6 +76,13 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
         lessonsCompleted: 0,
         totalLessons,
         category: course.category || 'General',
+        competency: gapEntry?.competencyName || course.competencyTag || '—',
+        bloomProgress: gapEntry
+          ? Math.round(((gapEntry.currentBloomLevel || 0) / Math.max(1, gapEntry.targetBloomLevel || 1)) * 100)
+          : null,
+        gapScore,
+        gapClosure,
+        rating: course.rating ?? 4.6,
         status: enrollment.status === 'completed'
           ? 'completed'
           : enrollment.progress > 0
@@ -74,7 +92,27 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
         dueDate: enrollment.dueDate ? new Date(enrollment.dueDate).toLocaleDateString() : null
       };
     }).filter((course): course is NonNullable<typeof course> => Boolean(course));
-  }, [courses, userEnrollments]);
+  }, [courses, userEnrollments, gapEntries]);
+
+  const recommendedByGap = useMemo(() => {
+    const enrolledIds = new Set(courseCards.map(course => course.id));
+    const recommendations = gapEntries
+      .filter(entry => entry.recommendedCourseId && !enrolledIds.has(entry.recommendedCourseId))
+      .map(entry => {
+        const course = courses.find(c => c.id === entry.recommendedCourseId);
+        return {
+          id: entry.recommendedCourseId as string,
+          title: course?.title || entry.recommendedCourseTitle || 'Recommended Course',
+          description: course?.description || course?.shortDescription || 'Based on your current gap analysis.',
+          competency: entry.competencyName || 'Core competency',
+          targetBloom: entry.targetBloomLevel,
+          currentBloom: entry.currentBloomLevel,
+          gapScore: entry.gapScore,
+          thumbnail: course?.thumbnail
+        };
+      });
+    return recommendations;
+  }, [gapEntries, courseCards, courses]);
 
   // Filter courses
   const filteredCourses = courseCards.filter(course => {
@@ -219,6 +257,59 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
         </button>
       </div>
 
+      {recommendedByGap.length > 0 && (
+        <section className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+              Recommended from Your Gap
+            </h2>
+            <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              {recommendedByGap.length} recommendations
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {recommendedByGap.map(rec => (
+              <div
+                key={rec.id}
+                onClick={() => openCourse(rec.id, rec.title)}
+                className={`p-4 rounded-xl cursor-pointer transition-all hover:scale-[1.01] ${
+                  isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:shadow-md'
+                } shadow-sm`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center overflow-hidden">
+                    {rec.thumbnail ? (
+                      <img src={rec.thumbnail} alt={rec.title} className="w-full h-full object-cover" />
+                    ) : (
+                      <BookOpen className="w-6 h-6 text-gray-500" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{rec.title}</h3>
+                    <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {rec.description}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                      <span className={`px-2 py-0.5 rounded-full ${
+                        isDarkMode ? 'bg-indigo-900/50 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                      }`}>
+                        {rec.competency}
+                      </span>
+                      <span className={`${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Bloom L{rec.currentBloom} → L{rec.targetBloom}
+                      </span>
+                      <span className={`${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                        Gap {Math.round((rec.gapScore ?? 0) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Search and Filters */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
         <div className="flex-1 relative">
@@ -230,6 +321,8 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
             placeholder="Search courses..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search courses"
+            title="Search courses"
             className={`w-full pl-10 pr-4 py-2.5 rounded-xl border transition-colors ${
               isDarkMode
                 ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-400 focus:border-indigo-500'
@@ -255,6 +348,8 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
           <div className={`flex rounded-xl border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
             <button
               onClick={() => setViewMode('grid')}
+              aria-label="Grid view"
+              title="Grid view"
               className={`p-2.5 rounded-l-xl ${
                 viewMode === 'grid'
                   ? isDarkMode
@@ -269,6 +364,8 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
             </button>
             <button
               onClick={() => setViewMode('list')}
+              aria-label="List view"
+              title="List view"
               className={`p-2.5 rounded-r-xl ${
                 viewMode === 'list'
                   ? isDarkMode
@@ -321,6 +418,8 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
                       e.stopPropagation();
                       openCourse(course.id, course.name);
                     }}
+                    aria-label={`Play ${course.name}`}
+                    title={`Play ${course.name}`}
                     className="absolute bottom-3 right-3 p-2.5 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 shadow-lg"
                   >
                     <Play className="w-5 h-5" />
@@ -334,6 +433,13 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
                 }`}>
                   {course.category}
                 </span>
+                {course.competency && (
+                  <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
+                    isDarkMode ? 'bg-indigo-900/50 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                  }`}>
+                    {course.competency}
+                  </span>
+                )}
 
                 <h3 className={`font-semibold mt-2 line-clamp-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
                   {course.name}
@@ -364,17 +470,40 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
                         {course.progress}%
                       </span>
                     </div>
-                    <div className={`w-full h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                      <div
-                        className={`h-2 rounded-full ${
-                          course.progress === 100
-                            ? 'bg-green-500'
-                            : 'bg-gradient-to-r from-indigo-500 to-purple-500'
-                        }`}
-                        style={{ width: `${course.progress}%` }}
-                      />
-                    </div>
+                    <progress
+                      className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} ${
+                        course.progress === 100 ? 'progress-fill-green' : 'progress-fill-indigo'
+                      }`}
+                      value={course.progress}
+                      max={100}
+                      aria-label={`${course.name} progress`}
+                    />
                   </div>
+                )}
+
+                {course.bloomProgress !== null && (
+                  <div className="mt-3">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>
+                        Bloom mastery
+                      </span>
+                      <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
+                        {course.bloomProgress}%
+                      </span>
+                    </div>
+                    <progress
+                      className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-emerald`}
+                      value={course.bloomProgress}
+                      max={100}
+                      aria-label={`${course.name} bloom progress`}
+                    />
+                  </div>
+                )}
+
+                {course.gapClosure !== null && (
+                  <p className={`text-xs mt-2 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                    Gap closure: {course.gapClosure}%
+                  </p>
                 )}
 
                 {course.dueDate && (
@@ -416,6 +545,13 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
                       <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                         {course.category}
                       </span>
+                      {course.competency && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          isDarkMode ? 'bg-indigo-900/50 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                        }`}>
+                          {course.competency}
+                        </span>
+                      )}
                     </div>
                     <h3 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
                       {course.name}
@@ -444,6 +580,8 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
                     )}
                     <button
                       onClick={(e) => e.stopPropagation()}
+                      aria-label={`More options for ${course.name}`}
+                      title={`More options for ${course.name}`}
                       className={`p-2 rounded-lg ${
                         isDarkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'
                       }`}
@@ -463,17 +601,40 @@ export default function MyCoursesPage({ isDarkMode }: MyCoursesPageProps) {
                         {course.progress}%
                       </span>
                     </div>
-                    <div className={`w-full h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                      <div
-                        className={`h-2 rounded-full ${
-                          course.progress === 100
-                            ? 'bg-green-500'
-                            : 'bg-gradient-to-r from-indigo-500 to-purple-500'
-                        }`}
-                        style={{ width: `${course.progress}%` }}
-                      />
-                    </div>
+                    <progress
+                      className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} ${
+                        course.progress === 100 ? 'progress-fill-green' : 'progress-fill-indigo'
+                      }`}
+                      value={course.progress}
+                      max={100}
+                      aria-label={`${course.name} progress`}
+                    />
                   </div>
+                )}
+
+                {course.bloomProgress !== null && (
+                  <div className="mt-3 max-w-md">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>
+                        Bloom mastery
+                      </span>
+                      <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
+                        {course.bloomProgress}%
+                      </span>
+                    </div>
+                    <progress
+                      className={`progress-base ${isDarkMode ? 'progress-track-dark' : 'progress-track-light'} progress-fill-emerald`}
+                      value={course.bloomProgress}
+                      max={100}
+                      aria-label={`${course.name} bloom progress`}
+                    />
+                  </div>
+                )}
+
+                {course.gapClosure !== null && (
+                  <p className={`text-xs mt-2 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                    Gap closure: {course.gapClosure}%
+                  </p>
                 )}
               </div>
             </div>

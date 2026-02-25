@@ -17,7 +17,6 @@ import {
   courseService as canonical,
   activity,
 } from './canonical';
-import * as lmsService from '../lib/lmsService';
 import { serviceEvents } from './events';
 
 /**
@@ -72,25 +71,9 @@ export const courseService = {
    * Uses canonical service for Firestore write, returns legacy format.
    */
   create: async (course: Omit<LegacyCourse, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Promise<LegacyCourse> => {
-    try {
-      // Use canonical service for the actual Firestore write
-      const canonicalCourse = await canonical.createCourse(toCanonicalInput(course));
-
-      // Emit event for reactivity
-      serviceEvents.emit('course.created', {
-        courseId: canonicalCourse.id,
-        orgId: canonicalCourse.orgId,
-      });
-
-      // Return legacy format for existing components
-      return tolegacyCourse(canonicalCourse);
-    } catch (error) {
-      // Fallback to legacy service during migration
-      console.warn('[courseService] Falling back to legacy service for create:', error);
-      const created = await lmsService.createCourse(course);
-      serviceEvents.emit('course.created', { courseId: created.id, orgId: created.orgId });
-      return created;
-    }
+    const canonicalCourse = await canonical.createCourse(toCanonicalInput(course));
+    serviceEvents.emit('course.created', { courseId: canonicalCourse.id, orgId: canonicalCourse.orgId });
+    return tolegacyCourse(canonicalCourse);
   },
 
   /**
@@ -100,9 +83,8 @@ export const courseService = {
     try {
       const course = await canonical.getCourse(courseId);
       return course ? tolegacyCourse(course) : null;
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for get:', error);
-      return lmsService.getCourse(courseId);
+    } catch {
+      return null;
     }
   },
 
@@ -117,18 +99,11 @@ export const courseService = {
       const courses = await canonical.getCoursesByOrg(orgId, {
         status: options?.status as CourseStatus,
       });
-
       let result = courses.map(tolegacyCourse);
-
-      // Apply limit if specified
-      if (options?.limit) {
-        result = result.slice(0, options.limit);
-      }
-
+      if (options?.limit) result = result.slice(0, options.limit);
       return result;
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for list:', error);
-      return lmsService.getCourses(orgId, options);
+    } catch {
+      return [];
     }
   },
 
@@ -139,9 +114,8 @@ export const courseService = {
     try {
       const courses = await canonical.getPublishedCourses(orgId);
       return courses.map(tolegacyCourse);
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for getPublished:', error);
-      return lmsService.getCourses(orgId, { status: 'published' });
+    } catch {
+      return [];
     }
   },
 
@@ -149,67 +123,40 @@ export const courseService = {
    * Update a course.
    */
   update: async (courseId: string, updates: Partial<LegacyCourse>): Promise<void> => {
-    try {
-      // Convert updates to canonical format
-      const canonicalUpdates: Partial<CanonicalCourse> = {};
-
-      if (updates.title !== undefined) canonicalUpdates.title = updates.title;
-      if (updates.description !== undefined) canonicalUpdates.description = updates.description;
-      if (updates.status !== undefined) canonicalUpdates.status = updates.status as CourseStatus;
-      if (updates.instructorId !== undefined) canonicalUpdates.instructorId = updates.instructorId || null;
-      if (updates.thumbnail !== undefined) canonicalUpdates.thumbnailUrl = updates.thumbnail || null;
-      if (updates.estimatedDuration !== undefined) canonicalUpdates.estimatedDuration = updates.estimatedDuration;
-      if (updates.tags !== undefined) canonicalUpdates.tags = updates.tags;
-
-      await canonical.updateCourse(courseId, canonicalUpdates);
-      serviceEvents.emit('course.updated', { courseId });
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for update:', error);
-      await lmsService.updateCourse(courseId, updates);
-      serviceEvents.emit('course.updated', { courseId });
-    }
+    const canonicalUpdates: Partial<CanonicalCourse> = {};
+    if (updates.title !== undefined) canonicalUpdates.title = updates.title;
+    if (updates.description !== undefined) canonicalUpdates.description = updates.description;
+    if (updates.status !== undefined) canonicalUpdates.status = updates.status as CourseStatus;
+    if (updates.instructorId !== undefined) canonicalUpdates.instructorId = updates.instructorId || null;
+    if (updates.thumbnail !== undefined) canonicalUpdates.thumbnailUrl = updates.thumbnail || null;
+    if (updates.estimatedDuration !== undefined) canonicalUpdates.estimatedDuration = updates.estimatedDuration;
+    if (updates.tags !== undefined) canonicalUpdates.tags = updates.tags;
+    await canonical.updateCourse(courseId, canonicalUpdates);
+    serviceEvents.emit('course.updated', { courseId });
   },
 
   /**
    * Publish a course.
    */
   publish: async (courseId: string, publishedBy?: string): Promise<void> => {
-    try {
-      await canonical.publishCourse(courseId, publishedBy || '');
-      serviceEvents.emit('course.published', { courseId });
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for publish:', error);
-      await lmsService.publishCourse(courseId);
-      serviceEvents.emit('course.published', { courseId });
-    }
+    await canonical.publishCourse(courseId, publishedBy || '');
+    serviceEvents.emit('course.published', { courseId });
   },
 
   /**
    * Archive a course.
    */
   archive: async (courseId: string): Promise<void> => {
-    try {
-      await canonical.archiveCourse(courseId);
-      serviceEvents.emit('course.archived', { courseId });
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for archive:', error);
-      await lmsService.archiveCourse(courseId);
-      serviceEvents.emit('course.archived', { courseId });
-    }
+    await canonical.archiveCourse(courseId);
+    serviceEvents.emit('course.archived', { courseId });
   },
 
   /**
    * Delete a course.
    */
   remove: async (courseId: string): Promise<void> => {
-    try {
-      await canonical.deleteCourse(courseId);
-      serviceEvents.emit('course.deleted', { courseId });
-    } catch (error) {
-      console.warn('[courseService] Falling back to legacy service for remove:', error);
-      await lmsService.deleteCourse(courseId);
-      serviceEvents.emit('course.deleted', { courseId });
-    }
+    await canonical.deleteCourse(courseId);
+    serviceEvents.emit('course.deleted', { courseId });
   },
 
   // ─── MODULE OPERATIONS ───────────────────────────────────────────────────────

@@ -1,4 +1,10 @@
-import { Timestamp } from 'firebase/firestore';
+// Local Timestamp stub — replaces firebase/firestore Timestamp for legacy schema types
+interface Timestamp {
+  seconds: number;
+  nanoseconds: number;
+  toDate(): Date;
+  toMillis(): number;
+}
 
 // ─── ROLES ───────────────────────────────────────────────────────────────────
 

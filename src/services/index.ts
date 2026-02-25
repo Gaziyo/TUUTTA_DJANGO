@@ -7,6 +7,7 @@ export { userService } from './userService';
 export { assessmentService } from './assessmentService';
 export { competencyService } from './competencyService';
 export { competencyBadgeService } from './competencyBadgeService';
+export { competencyFrameworkService } from './competencyFrameworkService';
 export { remediationService } from './remediationService';
 export { organizationService } from './organizationService';
 export { departmentService } from './departmentService';
@@ -18,6 +19,17 @@ export { pipelineService } from './pipelineService';
 export { statsService } from './statsService';
 export { announcementService } from './announcementService';
 export { observabilityService } from './observabilityService';
+export { gapMatrixService } from './gapMatrixService';
+export { adaptiveRecommendationService } from './adaptiveRecommendationService';
+export { adaptivePolicyService } from './adaptivePolicyService';
+export { adaptiveReleaseService } from './adaptiveReleaseService';
+export { remediationTriggerService } from './remediationTriggerService';
+export { forecastingService } from './forecastingService';
+export { governanceService } from './governanceService';
+export { knowledgeGraphService } from './knowledgeGraphService';
+export { gnnInsightService } from './gnnInsightService';
+export { baselineDiagnosticService } from './baselineDiagnosticService';
+export { interventionService } from './interventionService';
 export * as guidedService from './guidedService';
 
 // Canonical services (direct Firestore access with schema.ts types)
