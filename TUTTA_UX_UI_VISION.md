@@ -307,3 +307,182 @@ Legend:
 3. `canAccessOrgAdmin(user, orgSlug)`
 4. `canAccessMaster(user)`
 5. `getDefaultRouteForRole(role, context)`
+
+---
+
+## 11) Implementation Checklist (Frontend + Django)
+
+Use this as a delivery checklist for rolling out the IA safely in phases.
+
+### 11.1 Phase 1: Routing and Context Foundations
+
+Frontend:
+1. [ ] Add top-level route groups: `/me/*`, `/org/:orgSlug/*`, `/master/*`, `/context-switch`.
+2. [ ] Add app entry resolver at `/app` that redirects to last authorized workspace.
+3. [ ] Add context store with `activeContext` and `activeOrgSlug`.
+4. [ ] Add persistent workspace selection in local storage.
+
+Django:
+1. [ ] Ensure every org-scoped endpoint accepts and validates `orgSlug`.
+2. [ ] Add resolver endpoint for “last authorized workspace.”
+3. [ ] Normalize permission responses for denied access (403) and missing resources (404).
+
+### 11.2 Phase 2: Role-Based Navigation and Guards
+
+Frontend:
+1. [ ] Build sidebar from `role + context` config map.
+2. [ ] Hide inaccessible links instead of rendering disabled dead-ends.
+3. [ ] Implement route guards for personal, org, org-admin, and master routes.
+4. [ ] Add `/403` fallback with CTA: “Switch Workspace”.
+
+Django:
+1. [ ] Add reusable permission checks: personal, org-member, org-admin, master.
+2. [ ] Enforce org membership and role checks in viewsets/endpoints.
+3. [ ] Add audit logging for admin and master actions.
+
+### 11.3 Phase 3: Workspace Switcher and Onboarding
+
+Frontend:
+1. [ ] Add global workspace switcher in top bar.
+2. [ ] Implement onboarding flow: profile → organization → diagnostic → recommendation → complete.
+3. [ ] Route users with incomplete onboarding to `/onboarding/*`.
+4. [ ] Add empty states with one primary CTA per screen.
+
+Django:
+1. [ ] Track onboarding completion state per user.
+2. [ ] Add join request and invite code APIs.
+3. [ ] Add approval APIs for org admins and master users.
+
+### 11.4 Phase 4: Master Mode and Governance
+
+Frontend:
+1. [ ] Add master workspace pages: organizations, org requests, users, billing, compliance, system health.
+2. [ ] Add master-only nav visibility behind `is_master=true`.
+3. [ ] Add org impersonation/view mode indicators.
+
+Django:
+1. [ ] Enforce master-only org creation and org approval workflow.
+2. [ ] Add platform-level reporting endpoints.
+3. [ ] Add compliance and governance audit endpoints.
+
+### 11.5 QA and Rollout Gates
+
+1. [ ] Route guard tests for all role-context combinations.
+2. [ ] Permission contract tests for `/me/*`, `/org/*`, and `/master/*` APIs.
+3. [ ] Redirect tests: login, logout, expired membership, revoked admin, revoked master.
+4. [ ] Feature flag rollout by workspace: Personal → Org Learner → Org Admin → Master.
+5. [ ] Migration guide for old routes (`/home`, `/admin/*`, `/course/:id/*`) to new canonical paths.
+
+### 11.6 Definition of Done
+
+1. [ ] Users always see active context badge (Personal, Org, Master).
+2. [ ] Unauthorized deep links never expose data and always land on correct fallback.
+3. [ ] All role defaults redirect correctly after login.
+4. [ ] Master-only capabilities are inaccessible to non-master users in both UI and API.
+5. [ ] Documentation and route map are updated in one source of truth.
+
+---
+
+## 12) Migration Map + KPI Framework (Execution Layer)
+
+This section converts the IA vision into an implementation contract with measurable success criteria.
+
+### 12.1 Route Migration Map (Current -> Canonical)
+
+| Current Route | Canonical Route | Redirect Strategy | Phase |
+|---|---|---|---|
+| `/` | `/app` | Soft redirect for authenticated users; hard redirect for guests to `/welcome` | 1 |
+| `/home` | `/me/home` or `/org/:orgSlug/home` | Context-aware redirect based on active workspace | 1 |
+| `/courses` | `/me/courses` or `/org/:orgSlug/courses` | Context-aware redirect | 1 |
+| `/paths` | `/me/paths` or `/org/:orgSlug/paths` | Context-aware redirect | 1 |
+| `/analytics` | `/me/analytics` or `/org/:orgSlug/analytics` | Context-aware redirect | 1 |
+| `/progress` | `/me/progress` or `/org/:orgSlug/progress` | Context-aware redirect | 1 |
+| `/join-org` | `/onboarding/org` and `/org-discovery` | Keep `/join-org` as legacy alias during rollout | 3 |
+| `/course/:courseId/*` | `/org/:orgSlug/course/:courseId/*` | Preserve tail path; inject org slug from active org | 2 |
+| `/admin/*` | `/org/:orgSlug/admin/*` | Role and membership guard before redirect | 2 |
+| `N/A` | `/master/*` | New route group, no legacy mapping | 4 |
+
+Migration rules:
+1. Keep legacy aliases for one full release cycle.
+2. Add `route_version` telemetry (`legacy` or `canonical`) to monitor adoption.
+3. Remove aliases only when canonical usage is consistently above 95 percent for 30 days.
+
+### 12.2 Canonical URL Policy
+
+1. One resource must have one canonical URL.
+2. URL must encode context (`me`, `org/:orgSlug`, `master`).
+3. Query params are for state, never for authorization.
+4. If canonical context is missing, redirect through `/app` resolver.
+5. Backend authorization must not rely on frontend route assumptions.
+
+### 12.3 Feature Flags and Rollout Controls
+
+Recommended flags:
+1. `ff_contextual_routing_v2`
+2. `ff_workspace_switcher_v1`
+3. `ff_onboarding_wizard_v1`
+4. `ff_master_workspace_v1`
+5. `ff_legacy_route_aliases`
+
+Rollout sequence:
+1. Internal QA users
+2. Pilot org admins
+3. 10 percent learner traffic
+4. 50 percent learner traffic
+5. 100 percent rollout
+
+### 12.4 KPI Framework (Must Be Instrumented)
+
+| KPI | Definition | Target | Owner |
+|---|---|---|---|
+| Time to First Value | Minutes from first login to first meaningful action (course start, source upload, or onboarding completion) | < 2 minutes | Product + UX |
+| Onboarding Completion Rate | Completed onboarding sessions / started onboarding sessions | > 80 percent | Product |
+| Workspace Switch Success | Successful context switches / initiated switches | > 98 percent | Frontend |
+| Route Guard Accuracy | Valid guard outcomes / total guard decisions | > 99.5 percent | Frontend + Backend |
+| Unauthorized Exposure Incidents | Count of protected-page data shown to unauthorized users | 0 | Security |
+| Admin Task Completion | Completed key admin workflows (create course, invite member, create ELS project) | +20 percent vs baseline | Product |
+
+Measurement window:
+1. Daily monitoring with weekly trend review.
+2. Use baseline from 14 days before rollout.
+
+### 12.5 Required Telemetry Events
+
+Minimum event schema:
+1. `event_name`
+2. `user_id`
+3. `role`
+4. `workspace_context`
+5. `org_slug` (nullable)
+6. `route`
+7. `route_version`
+8. `result` (`success`, `denied`, `error`)
+9. `latency_ms`
+10. `timestamp`
+
+Priority events:
+1. `workspace_switch_started`
+2. `workspace_switch_completed`
+3. `route_redirect_applied`
+4. `route_guard_denied`
+5. `onboarding_step_completed`
+6. `time_to_first_value_recorded`
+7. `admin_workflow_completed`
+
+### 12.6 Critical Journey Test Matrix
+
+| Journey | Role | Expected Path | Pass Criteria |
+|---|---|---|---|
+| First login with no org | Learner | `/app` -> `/me/home` -> onboarding prompt | Lands in personal context with clear next action |
+| Join org and continue learning | Learner | `/onboarding/org` -> `/org/:orgSlug/home` | Context badge updates and learner nav changes |
+| Open deep admin URL without role | Learner | `/org/:orgSlug/admin/*` -> `/403` | No protected data rendered |
+| Create ELS project | Org Admin | `/org/:orgSlug/admin/enterprise` | Project created and visible in org context |
+| Switch orgs as multi-org admin | Org Admin | Header switcher -> target org admin dashboard | All links and data re-scope to selected org |
+| Access master workspace | Master | `/master/dashboard` | Master nav visible; non-master blocked |
+
+### 12.7 Rollback Plan
+
+1. Keep `ff_legacy_route_aliases` enabled until KPI stability is confirmed.
+2. If route guard accuracy drops below 99 percent in any 24-hour period, disable `ff_contextual_routing_v2`.
+3. Preserve server-side guard enforcement at all times, regardless of frontend flag state.
+4. Publish rollback decision log with timestamp, trigger metric, and mitigation action.
