@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(npm run build:*)",
+      "Bash(python3 manage.py makemigrations:*)",
+      "Bash(./venv/bin/python manage.py makemigrations:*)"
+    ]
+  }
+}
