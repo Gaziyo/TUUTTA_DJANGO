@@ -38,7 +38,26 @@ else:
     }
 
 # CORS
-CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',')
+def _parse_origin_csv(value: str) -> list[str]:
+    return [
+        item.strip().rstrip('/')
+        for item in (value or '').split(',')
+        if item.strip()
+    ]
+
+
+default_cors_origins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+
+env_cors_origins = _parse_origin_csv(os.environ.get('CORS_ALLOWED_ORIGINS', ''))
+frontend_origin = os.environ.get('FRONTEND_URL', '').strip().rstrip('/')
+if frontend_origin:
+    env_cors_origins.append(frontend_origin)
+
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(env_cors_origins + default_cors_origins))
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_parse_origin_csv(os.environ.get('CSRF_TRUSTED_ORIGINS', '')) + CORS_ALLOWED_ORIGINS))
 
 # Security Headers
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

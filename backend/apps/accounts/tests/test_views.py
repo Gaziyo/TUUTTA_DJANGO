@@ -3,6 +3,7 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
+from apps.organizations.models import Organization, OrganizationMember
 
 User = get_user_model()
 
@@ -133,4 +134,79 @@ class TestLogoutView:
         access = login_resp.data["access"]
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
         resp = api_client.post(reverse("logout"), {"refresh": refresh}, format="json")
+        assert resp.status_code == 200
+
+
+@pytest.mark.django_db
+class TestWorkspaceResolverView:
+    def test_resolve_personal_workspace_when_no_memberships(self, auth_client):
+        resp = auth_client.get(reverse("workspace-resolver"))
+        assert resp.status_code == 200
+        assert resp.data["activeContext"] == "personal"
+        assert resp.data["defaultRoute"] == "/me/home"
+
+    def test_resolve_org_workspace_from_membership(self, auth_client, registered_user):
+        org = Organization.objects.create(
+            name="Acme",
+            slug="acme",
+            created_by=registered_user,
+        )
+        OrganizationMember.objects.create(
+            organization=org,
+            user=registered_user,
+            role="learner",
+            status="active",
+        )
+
+        resp = auth_client.get(reverse("workspace-resolver"))
+        assert resp.status_code == 200
+        assert resp.data["activeContext"] == "org"
+        assert resp.data["activeOrgSlug"] == "acme"
+        assert resp.data["defaultRoute"] == "/org/acme/home"
+
+
+@pytest.mark.django_db
+class TestOnboardingStateView:
+    def test_get_default_onboarding_state(self, auth_client):
+        resp = auth_client.get(reverse("onboarding-state"))
+        assert resp.status_code == 200
+        assert resp.data["completed"] is False
+        assert resp.data["profile_setup"] is False
+
+    def test_patch_onboarding_state(self, auth_client):
+        resp = auth_client.patch(
+            reverse("onboarding-state"),
+            {
+                "profile_setup": True,
+                "organization_selection": True,
+                "diagnostic_assessment": True,
+                "first_recommendation": True,
+            },
+            format="json",
+        )
+        assert resp.status_code == 200
+        assert resp.data["completed"] is True
+        assert resp.data["completed_at"] is not None
+
+
+@pytest.mark.django_db
+class TestMasterUsersView:
+    def test_master_users_requires_superuser(self, auth_client):
+        resp = auth_client.get(reverse("master-users"))
+        assert resp.status_code == 403
+
+    def test_master_users_success(self, api_client):
+        User.objects.create_superuser(
+            username="master@example.com",
+            email="master@example.com",
+            password="MasterPass1!",
+        )
+        login_resp = api_client.post(
+            reverse("login"),
+            {"email": "master@example.com", "password": "MasterPass1!"},
+            format="json",
+        )
+        token = login_resp.data.get("access")
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        resp = api_client.get(reverse("master-users"))
         assert resp.status_code == 200

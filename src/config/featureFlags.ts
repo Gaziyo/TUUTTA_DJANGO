@@ -4,7 +4,12 @@ export type FeatureFlagKey =
   | 'mfa'
   | 'auditLogs'
   | 'dataExports'
-  | 'bulkImport';
+  | 'bulkImport'
+  | 'ff_contextual_routing_v2'
+  | 'ff_workspace_switcher_v1'
+  | 'ff_onboarding_wizard_v1'
+  | 'ff_master_workspace_v1'
+  | 'ff_legacy_route_aliases';
 
 export const featureFlags: Record<FeatureFlagKey, boolean> = {
   enterprise: true,
@@ -12,7 +17,12 @@ export const featureFlags: Record<FeatureFlagKey, boolean> = {
   mfa: true,
   auditLogs: true,
   dataExports: true,
-  bulkImport: true
+  bulkImport: true,
+  ff_contextual_routing_v2: true,
+  ff_workspace_switcher_v1: true,
+  ff_onboarding_wizard_v1: true,
+  ff_master_workspace_v1: true,
+  ff_legacy_route_aliases: true,
 };
 
 export const navFeatureMap: Record<string, FeatureFlagKey> = {

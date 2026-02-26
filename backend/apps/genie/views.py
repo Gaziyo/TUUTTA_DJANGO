@@ -10,14 +10,27 @@ from .tasks import (
     develop_project_task,
     implement_project_task,
     evaluate_project_task,
+    run_autonomous_addie_pipeline_task,
+    resume_autonomous_addie_pipeline_task,
+    cancel_autonomous_addie_pipeline_task,
+    retry_autonomous_stage_task,
 )
-from .models import GenieSource, GeniePipeline, ELSProject, ELSProjectPhase
+from .models import (
+    GenieSource,
+    GeniePipeline,
+    ELSProject,
+    ELSProjectPhase,
+    ELSProjectException,
+    ELSProjectRunMetric,
+)
 from .serializers import (
     GenieSourceSerializer,
     GeniePipelineSerializer,
     ELSProjectSerializer,
     ELSProjectListSerializer,
     ELSProjectPhaseSerializer,
+    ELSProjectExceptionSerializer,
+    ELSProjectRunMetricSerializer,
 )
 
 ELS_PHASE_ORDER = ['ingest', 'analyze', 'design', 'develop', 'implement', 'evaluate', 'personalize', 'portal', 'govern']
@@ -175,3 +188,147 @@ class ELSProjectViewSet(viewsets.ModelViewSet):
         project = self.get_object()
         evaluate_project_task.delay(str(project.id))
         return Response({'status': 'queued', 'phase': 'evaluate'})
+
+    @action(detail=True, methods=['post'], url_path='pipeline/run-autonomous')
+    def run_autonomous(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        idempotency_key = (
+            request.headers.get('Idempotency-Key')
+            or request.data.get('idempotency_key')
+            or f'auto-{project.id}-{int(timezone.now().timestamp())}'
+        )
+        result = run_autonomous_addie_pipeline_task(
+            str(project.id),
+            idempotency_key=idempotency_key,
+            requested_by=str(request.user.id),
+        )
+        status_code = status.HTTP_200_OK
+        if result.get('status') == 'missing':
+            status_code = status.HTTP_404_NOT_FOUND
+        elif result.get('status') in {'failed'}:
+            status_code = status.HTTP_400_BAD_REQUEST
+        return Response(result, status=status_code)
+
+    @action(detail=True, methods=['post'], url_path='pipeline/resume')
+    def resume_pipeline(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        idempotency_key = (
+            request.headers.get('Idempotency-Key')
+            or request.data.get('idempotency_key')
+            or f'resume-{project.id}-{int(timezone.now().timestamp())}'
+        )
+        result = resume_autonomous_addie_pipeline_task(
+            str(project.id),
+            idempotency_key=idempotency_key,
+            requested_by=str(request.user.id),
+        )
+        status_code = status.HTTP_200_OK
+        if result.get('status') == 'blocked':
+            status_code = status.HTTP_409_CONFLICT
+        elif result.get('status') == 'missing':
+            status_code = status.HTTP_404_NOT_FOUND
+        return Response(result, status=status_code)
+
+    @action(detail=True, methods=['post'], url_path='pipeline/cancel')
+    def cancel_pipeline(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        reason = request.data.get('reason', 'Canceled by operator')
+        result = cancel_autonomous_addie_pipeline_task(str(project.id), reason=reason)
+        status_code = status.HTTP_200_OK
+        if result.get('status') == 'missing':
+            status_code = status.HTTP_404_NOT_FOUND
+        return Response(result, status=status_code)
+
+    @action(detail=True, methods=['post'], url_path='pipeline/retry-stage')
+    def retry_stage(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        phase = request.data.get('phase', '')
+        result = retry_autonomous_stage_task(str(project.id), phase=phase, requested_by=str(request.user.id))
+        status_code = status.HTTP_200_OK
+        if result.get('status') == 'invalid_phase':
+            status_code = status.HTTP_400_BAD_REQUEST
+        elif result.get('status') == 'missing':
+            status_code = status.HTTP_404_NOT_FOUND
+        return Response(result, status=status_code)
+
+    @action(detail=True, methods=['post'], url_path='pipeline/rollout')
+    def update_rollout_controls(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        mode = request.data.get('mode', 'autonomous')
+        kill_switch = bool(request.data.get('kill_switch', False))
+        guardrails = request.data.get('guardrails') or {}
+        project.autonomous_mode = mode == 'autonomous' and not kill_switch
+        project.phases_data = {
+            **(project.phases_data or {}),
+            'rollout_controls': {
+                'mode': mode,
+                'kill_switch': kill_switch,
+                'guardrails': guardrails,
+                'updated_by': str(request.user.id),
+                'updated_at': timezone.now().isoformat(),
+            },
+        }
+        project.save(update_fields=['autonomous_mode', 'phases_data', 'updated_at'])
+        return Response({
+            'project_id': str(project.id),
+            'autonomous_mode': project.autonomous_mode,
+            'rollout_controls': project.phases_data.get('rollout_controls', {}),
+        })
+
+    @action(detail=True, methods=['get'], url_path='pipeline/status')
+    def pipeline_status(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        phases = ELSProjectPhase.objects.filter(project=project).order_by('phase')
+        return Response({
+            'project_id': str(project.id),
+            'run_state': project.run_state,
+            'current_phase': project.current_phase,
+            'run_id': str(project.current_run_id) if project.current_run_id else '',
+            'idempotency_key': project.current_idempotency_key,
+            'correlation_id': project.current_correlation_id,
+            'run_attempt': project.run_attempt,
+            'run_started_at': project.run_started_at,
+            'run_completed_at': project.run_completed_at,
+            'last_error_code': project.last_error_code,
+            'last_error_message': project.last_error_message,
+            'phases': ELSProjectPhaseSerializer(phases, many=True).data,
+        })
+
+    @action(detail=True, methods=['get'], url_path='pipeline/metrics')
+    def pipeline_metrics(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        run_id = request.query_params.get('run_id')
+        qs = ELSProjectRunMetric.objects.filter(project=project).order_by('-created_at')
+        if run_id:
+            qs = qs.filter(run_id=run_id)
+        return Response(ELSProjectRunMetricSerializer(qs[:250], many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='exceptions')
+    def list_exceptions(self, request, pk=None, **kwargs):
+        project = self.get_object()
+        qs = ELSProjectException.objects.filter(project=project).order_by('-created_at')
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return Response(ELSProjectExceptionSerializer(qs[:200], many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='exceptions/(?P<exception_id>[^/.]+)/resolve')
+    def resolve_exception(self, request, pk=None, exception_id=None, **kwargs):
+        project = self.get_object()
+        exception = ELSProjectException.objects.filter(project=project, id=exception_id).first()
+        if not exception:
+            return Response({'error': 'exception not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        action = request.data.get('action', 'resolve')
+        notes = request.data.get('notes', '')
+        if action == 'reject':
+            exception.status = 'rejected'
+        elif action == 'override':
+            exception.status = 'overridden'
+        else:
+            exception.status = 'resolved'
+        exception.resolved_by = request.user
+        exception.resolution_notes = notes
+        exception.resolved_at = timezone.now()
+        exception.save(update_fields=['status', 'resolved_by', 'resolution_notes', 'resolved_at', 'updated_at'])
+        return Response(ELSProjectExceptionSerializer(exception).data)

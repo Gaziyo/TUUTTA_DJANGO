@@ -51,6 +51,9 @@ import {
 } from 'lucide-react';
 import { useAppContext, useNavItems } from '../../context/AppContext';
 import { NavigationItem } from '../../config/appContext';
+import { useAuth } from '../auth/useAuth';
+import { useWorkspaceStore } from '../../store/workspaceStore';
+import { getAllowedNavIds, masterNavItems, normalizeWorkspaceRole } from '../../config/workspaceNavigation';
 
 // Icon mapping
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -126,8 +129,15 @@ export default function LeftNavigation({
     exitAdmin,
     openAdmin
   } = useAppContext();
+  const { role, isMaster } = useAuth();
+  const activeWorkspace = useWorkspaceStore((state) => state.activeContext);
   const navItems = useNavItems();
   const isAdminContext = currentContext === 'admin';
+  const workspaceRole = normalizeWorkspaceRole(role, isMaster);
+  const allowedNavIds = getAllowedNavIds(currentContext, workspaceRole);
+  const renderedNavItems: NavigationItem[] = activeWorkspace === 'master'
+    ? (masterNavItems as NavigationItem[])
+    : navItems.filter((item) => item.divider || allowedNavIds.includes(item.id));
 
   const adminQuickActions = [
     { label: 'Genie', icon: Brain, route: '/admin/genie' },
@@ -138,6 +148,12 @@ export default function LeftNavigation({
   // Handle navigation click
   const handleNavClick = (item: NavigationItem) => {
     if (item.divider) return;
+
+    if (activeWorkspace === 'master' && item.route) {
+      navigate(item.route);
+      onMobileClose();
+      return;
+    }
 
     // Handle back navigation
     if (item.id === 'back_to_courses') {
@@ -283,7 +299,9 @@ export default function LeftNavigation({
         <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
           <div className="flex items-center gap-2">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-              currentContext === 'admin'
+              activeWorkspace === 'master'
+                ? 'bg-amber-500/20 text-amber-400'
+                : currentContext === 'admin'
                 ? 'bg-purple-500/20 text-purple-500'
                 : currentContext === 'course'
                   ? 'bg-green-500/20 text-green-500'
@@ -300,7 +318,9 @@ export default function LeftNavigation({
             </div>
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-medium truncate ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                {currentContext === 'course'
+                {activeWorkspace === 'master'
+                  ? 'Master Workspace'
+                  : currentContext === 'course'
                   ? courseContext?.courseName
                   : currentContext === 'path'
                     ? pathContext?.pathName
@@ -309,10 +329,10 @@ export default function LeftNavigation({
                       : contextConfig.label}
               </p>
               <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                {contextConfig.label}
+                {activeWorkspace === 'master' ? 'Master' : contextConfig.label}
               </p>
             </div>
-            {isAdminContext && (
+            {isAdminContext && activeWorkspace !== 'master' && (
               <span className={`text-[10px] uppercase tracking-wide px-2 py-1 rounded-full ${
                 isDarkMode ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-100 text-purple-700'
               }`}>
@@ -323,7 +343,7 @@ export default function LeftNavigation({
         </div>
       )}
 
-      {isAdminContext && !isCollapsed && (
+      {isAdminContext && activeWorkspace !== 'master' && !isCollapsed && (
         <div className={`px-3 py-3 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
           <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${
             isDarkMode ? 'text-gray-500' : 'text-gray-400'
@@ -360,7 +380,7 @@ export default function LeftNavigation({
 
       {/* Navigation Items */}
       <nav className="flex-1 overflow-y-auto p-2 space-y-1">
-        {navItems.map(renderNavItem)}
+        {renderedNavItems.map(renderNavItem)}
       </nav>
 
       <div className={`px-2 py-2 border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>

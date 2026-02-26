@@ -1,5 +1,13 @@
 from django.contrib import admin
-from .models import Organization, OrganizationMember, Department, Team
+from .models import (
+    Organization,
+    OrganizationMember,
+    Department,
+    Team,
+    OrganizationRequest,
+    OrganizationJoinRequest,
+    OrganizationInviteCode,
+)
 
 
 @admin.register(Organization)
@@ -18,3 +26,6 @@ class OrganizationMemberAdmin(admin.ModelAdmin):
 
 admin.site.register(Department)
 admin.site.register(Team)
+admin.site.register(OrganizationRequest)
+admin.site.register(OrganizationJoinRequest)
+admin.site.register(OrganizationInviteCode)

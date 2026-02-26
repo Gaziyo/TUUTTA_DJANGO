@@ -10,6 +10,7 @@ export interface AuthUser {
   photo_url: string;
   subscription_tier: string;
   settings: Record<string, unknown>;
+  is_superuser?: boolean;
 }
 
 interface AuthState {

@@ -18,9 +18,13 @@ import {
   X,
   ChevronDown
 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useStore } from '../../store';
 import { useAuthStore } from '../../lib/authStore';
+import { useAuth } from '../auth/useAuth';
 import { useAppContext } from '../../context/AppContext';
+import { useWorkspaceStore } from '../../store/workspaceStore';
+import { workspaceService } from '../../services';
 import LeftNavigation from './LeftNavigation';
 import AppFooter from './AppFooter';
 
@@ -44,6 +48,13 @@ export default function UnifiedLayout({
   onSettingsOpen,
   onGamificationOpen
 }: UnifiedLayoutProps) {
+  const location = useLocation();
+  const { isMaster } = useAuth();
+  const {
+    activeContext,
+    activeOrgSlug,
+    setWorkspace,
+  } = useWorkspaceStore();
   const {
     currentContext,
     currentRoute,
@@ -88,6 +99,8 @@ export default function UnifiedLayout({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [hasInitializedRightPanel, setHasInitializedRightPanel] = useState(false);
+  const [workspaceOptions, setWorkspaceOptions] = useState<Array<{ slug: string; name: string; role: string }>>([]);
+  const [workspaceMasterEnabled, setWorkspaceMasterEnabled] = useState(false);
 
   // Refs
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -109,6 +122,26 @@ export default function UnifiedLayout({
     }
   }, [hasInitializedRightPanel, initialRightPanelOpen, isRightPanelOpen, rightPanel, toggleRightPanel]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resolved = await workspaceService.resolve();
+        if (cancelled) return;
+        setWorkspaceOptions(resolved.authorizedWorkspaces.organizations);
+        setWorkspaceMasterEnabled(resolved.authorizedWorkspaces.master);
+      } catch {
+        if (!cancelled) {
+          setWorkspaceOptions([]);
+          setWorkspaceMasterEnabled(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeContext, activeOrgSlug]);
+
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -126,6 +159,9 @@ export default function UnifiedLayout({
 
   // Get context label
   const getContextLabel = () => {
+    if (activeContext === 'master') return 'Master';
+    if (activeContext === 'org') return orgContext?.orgName || activeOrgSlug || 'Organization';
+    if (activeContext === 'personal') return 'Personal';
     switch (currentContext) {
       case 'course':
         return courseContext?.courseName || 'Course';
@@ -143,6 +179,7 @@ export default function UnifiedLayout({
   // Handle logout
   const handleLogout = () => {
     useAuthStore.getState().logout();
+    useWorkspaceStore.getState().resetWorkspace();
     setUser(null);
     navigate('/');
     setShowUserMenu(false);
@@ -179,6 +216,17 @@ export default function UnifiedLayout({
             <span className={`text-xl font-bold hidden sm:block ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
               Tuutta
             </span>
+            <span
+              className={`hidden md:inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                activeContext === 'master'
+                  ? isDarkMode ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'
+                  : activeContext === 'org'
+                    ? isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                    : isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-700'
+              }`}
+            >
+              {activeContext}
+            </span>
           </div>
 
           {/* Context Indicator / Breadcrumbs */}
@@ -213,7 +261,7 @@ export default function UnifiedLayout({
           )}
 
           {/* Context Selector (when no breadcrumbs) */}
-          {breadcrumbs.length === 0 && orgContext && (
+          {breadcrumbs.length === 0 && (
             <div className="relative ml-4" ref={contextMenuRef}>
               <button
                 onClick={() => setShowContextMenu(!showContextMenu)}
@@ -228,14 +276,15 @@ export default function UnifiedLayout({
               </button>
 
               {showContextMenu && (
-                <div className={`absolute top-full left-0 mt-1 w-48 rounded-lg shadow-lg border ${
+                <div className={`absolute top-full left-0 mt-1 w-64 rounded-lg shadow-lg border ${
                   isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
                 }`}>
                   <div className="py-1">
                     <button
                       onClick={() => {
                         setShowContextMenu(false);
-                        // Switch to personal context would go here
+                        setWorkspace('personal', null);
+                        navigate('/me/home');
                       }}
                       className={`w-full px-4 py-2 text-left text-sm ${
                         isDarkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'
@@ -243,14 +292,34 @@ export default function UnifiedLayout({
                     >
                       Personal
                     </button>
-                    {orgContext && (
+                    {workspaceOptions.map((orgOption) => (
                       <button
-                        onClick={() => setShowContextMenu(false)}
+                        key={orgOption.slug}
+                        onClick={() => {
+                          setShowContextMenu(false);
+                          setWorkspace('org', orgOption.slug);
+                          const suffix = isMaster ? '?viewAs=master' : '';
+                          navigate(`/org/${orgOption.slug}/home${suffix}`);
+                        }}
                         className={`w-full px-4 py-2 text-left text-sm ${
                           isDarkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'
                         }`}
                       >
-                        {orgContext.orgName}
+                        {orgOption.name}
+                      </button>
+                    ))}
+                    {workspaceMasterEnabled && (
+                      <button
+                        onClick={() => {
+                          setShowContextMenu(false);
+                          setWorkspace('master', null);
+                          navigate('/master/dashboard');
+                        }}
+                        className={`w-full px-4 py-2 text-left text-sm ${
+                          isDarkMode ? 'text-amber-300 hover:bg-gray-700' : 'text-amber-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        Master Workspace
                       </button>
                     )}
                     {canAccessAdmin && (
@@ -278,6 +347,14 @@ export default function UnifiedLayout({
 
         {/* Right: User Actions */}
         <div className="flex items-center gap-2">
+          {isMaster && activeContext === 'org' && new URLSearchParams(location.search).get('viewAs') === 'master' && (
+            <span className={`hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+              isDarkMode ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'
+            }`}>
+              Master View Mode
+            </span>
+          )}
+
           {/* Gamification (logged in users) */}
           {user && (
             <button

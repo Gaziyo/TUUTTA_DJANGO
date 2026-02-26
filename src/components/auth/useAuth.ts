@@ -22,6 +22,7 @@ interface AuthState {
   isAdmin: boolean;
   isManagerOrAbove: boolean;
   isInstructorOrAbove: boolean;
+  isMaster: boolean;
 }
 
 function mapLmsRoleToCanonical(role: LmsUserRole | null | undefined): UserRole | null {
@@ -56,7 +57,8 @@ export function useAuth(): AuthState {
     }
   }, [hasAccessToken, isAuthenticated, user, fetchCurrentUser]);
 
-  const role = mapLmsRoleToCanonical(lmsMemberRole) ?? 'learner';
+  const isMaster = Boolean(user?.is_superuser);
+  const role = isMaster ? 'superadmin' : (mapLmsRoleToCanonical(lmsMemberRole) ?? 'learner');
   const orgId = lmsOrgId ?? null;
   const uid = user?.id ?? null;
   const loading = isLoading || (hasAccessToken && isAuthenticated && !user);
@@ -76,6 +78,7 @@ export function useAuth(): AuthState {
     isAdmin,
     isManagerOrAbove,
     isInstructorOrAbove,
+    isMaster,
   };
 }
 

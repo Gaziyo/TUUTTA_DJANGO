@@ -92,4 +92,30 @@ export const organizationService = {
     const merged = { ...(data.settings ?? defaultSettings()), ...settings };
     await apiClient.patch(`/organizations/${orgId}/`, { settings: merged });
   },
+
+  requestCreation: async (payload: {
+    name: string;
+    slug: string;
+    plan?: SubscriptionTier;
+    description?: string;
+  }): Promise<void> => {
+    await apiClient.post('/organization-requests/', {
+      name: payload.name,
+      slug: payload.slug,
+      plan: payload.plan ?? 'free',
+      description: payload.description ?? '',
+    });
+  },
+
+  requestJoin: async (orgIdOrSlug: string, note?: string): Promise<void> => {
+    await apiClient.post(`/organizations/${orgIdOrSlug}/join-requests/`, { note: note ?? '' });
+  },
+
+  redeemInviteCode: async (code: string): Promise<{ organization: Organization; member: Record<string, unknown> | null }> => {
+    const { data } = await apiClient.post('/invite-codes/redeem/', { code });
+    return {
+      organization: mapOrg(data.organization as Record<string, unknown>),
+      member: (data.member as Record<string, unknown>) || null,
+    };
+  },
 };

@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import Organization, OrganizationMember, Department, Team
+from .models import (
+    Organization,
+    OrganizationMember,
+    Department,
+    Team,
+    OrganizationRequest,
+    OrganizationJoinRequest,
+    OrganizationInviteCode,
+)
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -48,3 +56,109 @@ class TeamSerializer(serializers.ModelSerializer):
         model = Team
         fields = ['id', 'organization', 'department', 'name', 'description', 'lead', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+class OrganizationRequestSerializer(serializers.ModelSerializer):
+    requested_by_email = serializers.EmailField(source='requested_by.email', read_only=True)
+    reviewed_by_email = serializers.EmailField(source='reviewed_by.email', read_only=True)
+    created_org_slug = serializers.CharField(source='created_org.slug', read_only=True)
+
+    class Meta:
+        model = OrganizationRequest
+        fields = [
+            'id',
+            'name',
+            'slug',
+            'description',
+            'plan',
+            'status',
+            'review_note',
+            'requested_by',
+            'requested_by_email',
+            'reviewed_by',
+            'reviewed_by_email',
+            'reviewed_at',
+            'created_org',
+            'created_org_slug',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'status',
+            'requested_by',
+            'requested_by_email',
+            'reviewed_by',
+            'reviewed_by_email',
+            'reviewed_at',
+            'created_org',
+            'created_org_slug',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class OrganizationJoinRequestSerializer(serializers.ModelSerializer):
+    requester_email = serializers.EmailField(source='requester.email', read_only=True)
+    requester_name = serializers.SerializerMethodField()
+    reviewed_by_email = serializers.EmailField(source='reviewed_by.email', read_only=True)
+
+    def get_requester_name(self, obj):
+        return obj.requester.display_name or obj.requester.username
+
+    class Meta:
+        model = OrganizationJoinRequest
+        fields = [
+            'id',
+            'organization',
+            'requester',
+            'requester_email',
+            'requester_name',
+            'note',
+            'status',
+            'reviewed_by',
+            'reviewed_by_email',
+            'reviewed_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'organization',
+            'requester',
+            'requester_email',
+            'requester_name',
+            'status',
+            'reviewed_by',
+            'reviewed_by_email',
+            'reviewed_at',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class OrganizationInviteCodeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrganizationInviteCode
+        fields = [
+            'id',
+            'organization',
+            'code',
+            'role',
+            'is_active',
+            'max_uses',
+            'used_count',
+            'expires_at',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'organization',
+            'code',
+            'used_count',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]

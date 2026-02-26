@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 from django.conf import settings
@@ -33,6 +33,7 @@ from .tasks import (
 from .exports import build_csv, create_summary_pdf, create_certificate_pdf, build_evidence_zip
 
 from apps.organizations.models import Organization, OrganizationMember
+from apps.accounts.models import User
 from apps.courses.models import Course
 from apps.enrollments.models import Enrollment
 from apps.assessments.models import AssessmentAttempt
@@ -425,3 +426,38 @@ class EvidenceExportView(APIView):
         url = _generate_presigned_url(saved_path)
 
         return Response({'url': url, 'path': saved_path})
+
+
+class MasterReportSummaryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_superuser:
+            return Response(
+                {'error': {'status': 403, 'code': 'forbidden', 'detail': 'Master permissions are required.'}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        now = timezone.now()
+        week_ago = now - timedelta(days=7)
+
+        organization_count = Organization.objects.filter(is_active=True).count()
+        active_memberships = OrganizationMember.objects.filter(status='active').count()
+        user_count = User.objects.count()
+        course_count = Course.objects.count()
+        enrollment_count = Enrollment.objects.count()
+        completions_week = Enrollment.objects.filter(status='completed', completed_at__gte=week_ago).count()
+        audit_events_week = AuditLog.objects.filter(timestamp__gte=week_ago).count()
+
+        return Response(
+            {
+                'timestamp': now.isoformat(),
+                'organizations': organization_count,
+                'users': user_count,
+                'active_memberships': active_memberships,
+                'courses': course_count,
+                'enrollments': enrollment_count,
+                'completions_last_7d': completions_week,
+                'audit_events_last_7d': audit_events_week,
+            }
+        )

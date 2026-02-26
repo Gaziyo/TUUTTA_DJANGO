@@ -26,7 +26,7 @@ interface JoinOrganizationPageProps {
 export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPageProps) {
   const { user } = useStore();
   const { joinOrg } = useAppContext();
-  const { createOrganization, isLoading, setCurrentOrg, setCurrentMember } = useLMSStore();
+  const { isLoading, setCurrentOrg, setCurrentMember } = useLMSStore();
   const [inviteCode, setInviteCode] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Organization[]>([]);
@@ -38,50 +38,35 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
   const [createOrgName, setCreateOrgName] = useState('');
   const [createOrgSlug, setCreateOrgSlug] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [creatingOrg, setCreatingOrg] = useState(false);
   const filteredOrgs = searchResults.filter(org =>
     org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     org.slug.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const ensureOrgMembership = async (org: Organization) => {
-    if (!user?.id) {
-      throw new Error('Please sign in to join an organization.');
-    }
-
-    // Membership key format: {orgId}_{authUid}
-    const membershipId = `${org.id}_${user.id}`;
-    let member = await userService.getMember(membershipId);
-
-    if (!member) {
-      member = await userService.addMember({
-        odId: org.id,
-        orgId: org.id,
-        userId: user.id,
-        email: user.email || `${user.id}@local.tuutta`,
-        name: user.name || 'Learner',
-        role: 'learner',
-        status: 'active',
-        joinedAt: Date.now()
-      });
-    }
-
-    setCurrentOrg(org);
-    setCurrentMember(member);
-    joinOrg(org.id, org.name, member.role);
-  };
-
   const handleJoinWithCode = async () => {
     if (!inviteCode.trim()) return;
     setIsJoining('code');
     setSearchError(null);
     try {
-      const org = await organizationService.getBySlug(inviteCode.trim());
-      if (!org) {
-        setSearchError('No organization found for that code.');
-        return;
+      const redeemed = await organizationService.redeemInviteCode(inviteCode.trim());
+      const org = redeemed.organization;
+      setCurrentOrg(org);
+      if (redeemed.member) {
+        const member = {
+          id: String(redeemed.member.id || ''),
+          odId: String(redeemed.member.organization || org.id),
+          orgId: String(redeemed.member.organization || org.id),
+          userId: String(redeemed.member.user || user?.id || ''),
+          email: String(redeemed.member.user_email || user?.email || ''),
+          name: String(redeemed.member.user_name || user?.name || 'Learner'),
+          role: (redeemed.member.role as any) || 'learner',
+          status: (redeemed.member.status as any) || 'active',
+        };
+        setCurrentMember(member as any);
+        joinOrg(org.id, org.name, member.role);
       }
-      await ensureOrgMembership(org);
       setInviteCode('');
       setShowCodeInput(false);
     } catch (error) {
@@ -94,8 +79,17 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
   const handleJoinOrg = async (org: Organization) => {
     setIsJoining(org.id);
     try {
-      await ensureOrgMembership(org);
-      setJoinedOrgs(prev => [...prev, org.id]);
+      const memberships = await userService.listMembershipsForUser(user?.id || '');
+      const existing = memberships.find(item => (item.orgId || item.odId) === org.id);
+      if (existing) {
+        setCurrentOrg(org);
+        setCurrentMember(existing);
+        joinOrg(org.id, org.name, existing.role);
+        setJoinedOrgs(prev => [...prev, org.id]);
+      } else {
+        await organizationService.requestJoin(org.id);
+        setSearchError('Join request sent. An organization admin must approve access.');
+      }
     } catch (error) {
       setSearchError((error as Error).message);
     } finally {
@@ -127,16 +121,18 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
       return;
     }
     setCreateError(null);
+    setCreateSuccess(null);
     setCreatingOrg(true);
     try {
       const slug = createOrgSlug.trim() || createOrgName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      await createOrganization(createOrgName.trim(), slug, {
-        id: user?.id,
-        name: user?.name,
-        email: user?.email
+      await organizationService.requestCreation({
+        name: createOrgName.trim(),
+        slug,
+        plan: 'free',
       });
       setCreateOrgName('');
       setCreateOrgSlug('');
+      setCreateSuccess('Organization request submitted. A master user must approve it.');
     } catch (error) {
       setCreateError((error as Error).message);
     } finally {
@@ -253,6 +249,9 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
           {createError && (
             <p className="mt-3 text-sm text-red-500">{createError}</p>
           )}
+          {createSuccess && (
+            <p className="mt-3 text-sm text-emerald-500">{createSuccess}</p>
+          )}
 
           <div className="mt-5 flex items-center gap-3">
             <button
@@ -273,7 +272,7 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
               )}
             </button>
             <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              You’ll be added as an admin automatically.
+              Organization creation is master-approved.
             </p>
           </div>
         </div>

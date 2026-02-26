@@ -5,8 +5,27 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_nested import routers as nested_routers
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from apps.accounts.views import RegisterView, LoginView, LogoutView, CurrentUserView
-from apps.organizations.views import OrganizationViewSet, DepartmentViewSet, TeamViewSet, MyMembershipsView, OrganizationMemberViewSet, MemberDetailView
+from apps.accounts.views import (
+    RegisterView,
+    LoginView,
+    LogoutView,
+    CurrentUserView,
+    WorkspaceResolverView,
+    OnboardingStateView,
+    MasterUsersView,
+)
+from apps.organizations.views import (
+    OrganizationViewSet,
+    DepartmentViewSet,
+    TeamViewSet,
+    MyMembershipsView,
+    OrganizationMemberViewSet,
+    MemberDetailView,
+    OrganizationRequestViewSet,
+    OrganizationJoinRequestViewSet,
+    OrganizationInviteCodeViewSet,
+    InviteCodeRedeemView,
+)
 from apps.courses.views import (
     CourseViewSet,
     CourseModuleViewSet,
@@ -54,7 +73,7 @@ from apps.analytics.views import (
     WorkforceCapabilityIndexViewSet, DepartmentBloomTrendViewSet,
     CompetencyTrajectoryForecastViewSet, ComplianceReadinessPredictionViewSet,
     StrategicSkillShortageDetectionViewSet,
-    EvidenceExportView
+    EvidenceExportView, MasterReportSummaryView
 )
 from apps.governance.views import (
     GovernancePolicyViewSet,
@@ -62,6 +81,7 @@ from apps.governance.views import (
     BiasScanViewSet,
     ModelVersionViewSet,
     HumanOverrideViewSet,
+    MasterGovernanceAuditView,
 )
 from apps.webhooks.views import WebhookEndpointViewSet, WebhookDeliveryViewSet
 
@@ -73,6 +93,7 @@ def health_check(request):
 # Main router
 router = DefaultRouter()
 router.register(r'organizations', OrganizationViewSet, basename='organization')
+router.register(r'organization-requests', OrganizationRequestViewSet, basename='organization-request')
 router.register(r'courses', CourseViewSet, basename='course')
 router.register(r'assessments', AssessmentViewSet, basename='assessment')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
@@ -97,6 +118,8 @@ orgs_router = nested_routers.NestedDefaultRouter(router, r'organizations', looku
 orgs_router.register(r'departments', DepartmentViewSet, basename='organization-departments')
 orgs_router.register(r'teams', TeamViewSet, basename='organization-teams')
 orgs_router.register(r'members', OrganizationMemberViewSet, basename='organization-members')
+orgs_router.register(r'join-requests', OrganizationJoinRequestViewSet, basename='organization-join-requests')
+orgs_router.register(r'invite-codes', OrganizationInviteCodeViewSet, basename='organization-invite-codes')
 orgs_router.register(r'learning-paths', LearningPathViewSet, basename='organization-learning-paths')
 # Cognitive OS nested routes
 orgs_router.register(r'competency-frameworks', CompetencyFrameworkViewSet, basename='organization-competency-frameworks')
@@ -160,10 +183,14 @@ urlpatterns = [
         path('auth/logout/', LogoutView.as_view(), name='logout'),
         path('auth/token/refresh/', __import__('rest_framework_simplejwt.views', fromlist=['TokenRefreshView']).TokenRefreshView.as_view(), name='token-refresh'),
         path('auth/me/', CurrentUserView.as_view(), name='current-user'),
+        path('auth/onboarding/', OnboardingStateView.as_view(), name='onboarding-state'),
+        path('workspaces/resolve/', WorkspaceResolverView.as_view(), name='workspace-resolver'),
+        path('master/users/', MasterUsersView.as_view(), name='master-users'),
 
         # Memberships
         path('members/me/', MyMembershipsView.as_view(), name='my-memberships'),
         path('members/<uuid:pk>/', MemberDetailView.as_view(), name='member-detail'),
+        path('invite-codes/redeem/', InviteCodeRedeemView.as_view(), name='invite-code-redeem'),
 
         # Main routes
         path('', include(router.urls)),
@@ -183,7 +210,9 @@ urlpatterns = [
         path('ai/search/', WebSearchView.as_view(), name='ai-search'),
 
         # Evidence export
-        path('organizations/<uuid:org_id>/evidence-export/', EvidenceExportView.as_view(), name='evidence-export'),
+        path('organizations/<str:org_id>/evidence-export/', EvidenceExportView.as_view(), name='evidence-export'),
+        path('master/reports/summary/', MasterReportSummaryView.as_view(), name='master-report-summary'),
+        path('master/governance/audit/', MasterGovernanceAuditView.as_view(), name='master-governance-audit'),
 
         # Gamification
         path('leaderboard/', LeaderboardView.as_view(), name='leaderboard'),

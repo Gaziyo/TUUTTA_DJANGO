@@ -3,6 +3,7 @@ from django.utils import timezone
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import (
     GovernancePolicy,
@@ -18,6 +19,7 @@ from .serializers import (
     ModelVersionSerializer,
     HumanOverrideSerializer,
 )
+from apps.analytics.models import AuditLog
 
 
 class GovernancePolicyViewSet(viewsets.ModelViewSet):
@@ -145,3 +147,53 @@ class HumanOverrideViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         org_id = self.kwargs.get('organization_pk') or self.request.data.get('organization')
         serializer.save(organization_id=org_id, user=self.request.user)
+
+
+class MasterGovernanceAuditView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_superuser:
+            return Response(
+                {'error': {'status': 403, 'code': 'forbidden', 'detail': 'Master permissions are required.'}},
+                status=403,
+            )
+
+        recent_audits = AuditLog.objects.select_related('organization').order_by('-timestamp')[:100]
+        recent_overrides = HumanOverride.objects.select_related('organization', 'user').order_by('-created_at')[:50]
+        open_bias_scans = BiasScan.objects.filter(status__in=['queued', 'running']).count()
+        active_policies = GovernancePolicy.objects.filter(is_active=True).count()
+
+        return Response(
+            {
+                'summary': {
+                    'active_policies': active_policies,
+                    'open_bias_scans': open_bias_scans,
+                    'recent_overrides': recent_overrides.count(),
+                    'recent_audit_events': recent_audits.count(),
+                },
+                'recent_audits': [
+                    {
+                        'id': str(log.id),
+                        'organization': log.organization.name if log.organization else '',
+                        'organization_id': str(log.organization_id) if log.organization_id else None,
+                        'action': log.action,
+                        'actor_name': log.actor_name,
+                        'timestamp': log.timestamp.isoformat() if log.timestamp else None,
+                    }
+                    for log in recent_audits
+                ],
+                'recent_overrides': [
+                    {
+                        'id': str(override.id),
+                        'organization': override.organization.name if override.organization else '',
+                        'target_type': override.target_type,
+                        'target_id': override.target_id,
+                        'action': override.action,
+                        'reason': override.reason,
+                        'created_at': override.created_at.isoformat() if override.created_at else None,
+                    }
+                    for override in recent_overrides
+                ],
+            }
+        )

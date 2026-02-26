@@ -14,10 +14,11 @@
  *   </Route>
  */
 
-import React, { ReactNode } from 'react';
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import React, { ReactNode, useEffect, useState } from 'react';
+import { Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
 import { useAuth, hasRoleAccess } from './useAuth';
 import type { UserRole } from '../../types/schema';
+import { resolveWorkspaceAccess } from '../../services';
 
 const normalizePath = (path: string): string => {
   if (!path) return '/';
@@ -61,7 +62,7 @@ export function RouteGuard({
   allowedRoles,
   children,
   loginRedirect = '/login',
-  unauthorizedRedirect = '/home',
+  unauthorizedRedirect = '/403',
 }: RouteGuardProps) {
   const { role, loading, isAuthenticated } = useAuth();
   const location = useLocation();
@@ -136,7 +137,7 @@ export function AuthenticatedRoute({ children }: { children?: ReactNode }) {
  */
 export function AdminRoute({ children }: { children?: ReactNode }) {
   return (
-    <RouteGuard allowedRoles={['superadmin', 'admin']}>
+    <RouteGuard allowedRoles={['superadmin', 'admin', 'manager']}>
       {children}
     </RouteGuard>
   );
@@ -175,6 +176,89 @@ export function LearnerRoute({ children }: { children?: ReactNode }) {
       {children}
     </RouteGuard>
   );
+}
+
+export function PersonalWorkspaceRoute({ children }: { children?: ReactNode }) {
+  return (
+    <RouteGuard
+      allowedRoles={['superadmin', 'admin', 'manager', 'instructor', 'learner']}
+      unauthorizedRedirect="/403"
+    >
+      {children}
+    </RouteGuard>
+  );
+}
+
+function OrgWorkspaceGuardBase({
+  requireOrgAdmin = false,
+  children,
+}: {
+  requireOrgAdmin?: boolean;
+  children?: ReactNode;
+}) {
+  const { loading, isAuthenticated } = useAuth();
+  const { orgSlug } = useParams();
+  const location = useLocation();
+  const [checking, setChecking] = useState(true);
+  const [allowed, setAllowed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkAccess = async () => {
+      if (!isAuthenticated || !orgSlug) {
+        if (!cancelled) {
+          setAllowed(false);
+          setChecking(false);
+        }
+        return;
+      }
+      const access = await resolveWorkspaceAccess(orgSlug);
+      const pass = requireOrgAdmin ? access.canAccessOrgAdmin : access.canAccessOrg;
+      if (!cancelled) {
+        setAllowed(pass);
+        setChecking(false);
+      }
+    };
+
+    checkAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, orgSlug, requireOrgAdmin]);
+
+  if (loading || checking) {
+    return <FullPageSpinner />;
+  }
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+  if (!allowed) {
+    return <Navigate to="/403" state={{ reason: 'unauthorized', from: location.pathname }} replace />;
+  }
+  return <>{children || <Outlet />}</>;
+}
+
+export function OrgWorkspaceRoute({ children }: { children?: ReactNode }) {
+  return <OrgWorkspaceGuardBase>{children}</OrgWorkspaceGuardBase>;
+}
+
+export function OrgAdminWorkspaceRoute({ children }: { children?: ReactNode }) {
+  return <OrgWorkspaceGuardBase requireOrgAdmin>{children}</OrgWorkspaceGuardBase>;
+}
+
+export function MasterWorkspaceRoute({ children }: { children?: ReactNode }) {
+  const { loading, isAuthenticated, isMaster } = useAuth();
+  const location = useLocation();
+
+  if (loading) return <FullPageSpinner />;
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+  if (!isMaster) {
+    return <Navigate to="/403" state={{ reason: 'unauthorized', from: location.pathname }} replace />;
+  }
+  return <>{children || <Outlet />}</>;
 }
 
 export default RouteGuard;

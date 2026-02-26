@@ -74,6 +74,31 @@ PHASE_STATUSES = [
     ('in_progress', 'In Progress'),
     ('completed', 'Completed'),
     ('skipped', 'Skipped'),
+    ('failed', 'Failed'),
+    ('exception_required', 'Exception Required'),
+    ('canceled', 'Canceled'),
+]
+
+RUN_STATES = [
+    ('idle', 'Idle'),
+    ('queued', 'Queued'),
+    ('ingesting', 'Ingesting'),
+    ('analyzing', 'Analyzing'),
+    ('designing', 'Designing'),
+    ('developing', 'Developing'),
+    ('implementing', 'Implementing'),
+    ('evaluating', 'Evaluating'),
+    ('completed', 'Completed'),
+    ('failed', 'Failed'),
+    ('exception_required', 'Exception Required'),
+    ('canceled', 'Canceled'),
+]
+
+GATE_RESULTS = [
+    ('pending', 'Pending'),
+    ('pass', 'Pass'),
+    ('exception_required', 'Exception Required'),
+    ('fail', 'Fail'),
 ]
 
 
@@ -99,6 +124,17 @@ class ELSProject(models.Model):
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=PROJECT_STATUSES, default='draft')
     current_phase = models.CharField(max_length=20, choices=ELS_PHASES, default='ingest')
+    run_state = models.CharField(max_length=30, choices=RUN_STATES, default='idle')
+    current_run_id = models.UUIDField(null=True, blank=True)
+    current_idempotency_key = models.CharField(max_length=128, blank=True)
+    current_correlation_id = models.CharField(max_length=128, blank=True)
+    run_attempt = models.IntegerField(default=0)
+    run_started_at = models.DateTimeField(null=True, blank=True)
+    run_completed_at = models.DateTimeField(null=True, blank=True)
+    last_error_code = models.CharField(max_length=100, blank=True)
+    last_error_message = models.TextField(blank=True)
+    autonomous_mode = models.BooleanField(default=True)
+    last_outcome_package = models.JSONField(default=dict)
 
     # Flexible per-phase snapshot data (started_at, completed_at, output keys)
     phases_data = models.JSONField(default=dict)
@@ -145,6 +181,10 @@ class ELSProjectPhase(models.Model):
 
     # Bloom taxonomy distribution captured at design phase
     bloom_distribution = models.JSONField(default=dict)
+    confidence_score = models.FloatField(null=True, blank=True)
+    risk_score = models.FloatField(null=True, blank=True)
+    quality_checks = models.JSONField(default=list)
+    gate_result = models.CharField(max_length=30, choices=GATE_RESULTS, default='pending')
 
     notes = models.TextField(blank=True)
 
@@ -158,3 +198,76 @@ class ELSProjectPhase(models.Model):
 
     def __str__(self):
         return f'{self.project.name} / {self.phase} ({self.status})'
+
+
+class ELSProjectException(models.Model):
+    STATUSES = [
+        ('open', 'Open'),
+        ('resolved', 'Resolved'),
+        ('rejected', 'Rejected'),
+        ('overridden', 'Overridden'),
+    ]
+    PRIORITIES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('critical', 'Critical'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(ELSProject, on_delete=models.CASCADE, related_name='exceptions')
+    phase = models.CharField(max_length=20, choices=ELS_PHASES)
+    reason_code = models.CharField(max_length=100)
+    reason_message = models.TextField(blank=True)
+    confidence_score = models.FloatField(null=True, blank=True)
+    risk_score = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default='open')
+    priority = models.CharField(max_length=20, choices=PRIORITIES, default='medium')
+    due_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='els_exceptions_resolved',
+    )
+    resolution_notes = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'els_project_exceptions'
+        indexes = [
+            models.Index(fields=['project', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+
+
+class ELSProjectRunMetric(models.Model):
+    STATUSES = [
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('exception_required', 'Exception Required'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(ELSProject, on_delete=models.CASCADE, related_name='run_metrics')
+    run_id = models.UUIDField()
+    phase = models.CharField(max_length=20, choices=ELS_PHASES)
+    status = models.CharField(max_length=20, choices=STATUSES, default='success')
+    duration_ms = models.IntegerField(default=0)
+    retry_count = models.IntegerField(default=0)
+    token_cost = models.FloatField(default=0.0)
+    compute_cost = models.FloatField(default=0.0)
+    quality_score = models.FloatField(null=True, blank=True)
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'els_project_run_metrics'
+        indexes = [
+            models.Index(fields=['project', 'run_id']),
+            models.Index(fields=['created_at']),
+        ]

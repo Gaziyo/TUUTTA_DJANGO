@@ -19,16 +19,31 @@ import {
 } from 'lucide-react';
 import { useStore, DEFAULT_SETTINGS } from './store';
 import { useLMSStore } from './store/lmsStore';
+import { useWorkspaceStore, parseWorkspaceFromPath } from './store/workspaceStore';
 import { AppContextProvider, useAppContext } from './context/AppContext';
 import { GuidedPipelineProvider } from './context/GuidedPipelineContext';
 import { ToastProvider } from './components/ui/toast-provider';
-import { AdminRoute, LearnerRoute } from './components/auth/RouteGuard';
+import {
+  AdminRoute,
+  LearnerRoute,
+  PersonalWorkspaceRoute,
+  MasterWorkspaceRoute,
+  OrgWorkspaceRoute,
+} from './components/auth/RouteGuard';
 import { useAuth } from './components/auth/useAuth';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { Skeleton, AdminTableSkeleton } from './components/ui/skeleton';
 import AppFooter from './components/layout/AppFooter';
 import { isEnterpriseFeatureEnabled } from './config/featureFlags';
-import { announcementService } from './services';
+import {
+  announcementService,
+  organizationService,
+  userService,
+  workspaceService,
+  masterService,
+  onboardingService,
+  resolveWorkspaceAccess,
+} from './services';
 
 // Lazy load heavy components
 const ChatInterface = lazy(() => import('./components/ChatInterface'));
@@ -60,6 +75,8 @@ const AppAdminGuide = lazy(() => import('./pages/AppAdminGuide'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
 const SecurityPage = lazy(() => import('./pages/SecurityPage'));
+const ForbiddenPage = lazy(() => import('./pages/ForbiddenPage'));
+const OnboardingFlowPage = lazy(() => import('./pages/OnboardingFlowPage'));
 const QuizBuilder = lazy(() => import('./components/admin/QuizBuilder'));
 const SurveyBuilder = lazy(() => import('./components/admin/SurveyBuilder'));
 
@@ -132,6 +149,471 @@ const LoadingSpinner = () => (
     </div>
   </div>
 );
+
+const normalizeAliasPath = (value: string | undefined): string[] =>
+  (value || '').split('/').map((part) => part.trim()).filter(Boolean);
+
+const resolveMeLegacyPath = (splat: string | undefined): string => {
+  const [section] = normalizeAliasPath(splat);
+  switch (section) {
+    case 'home':
+      return '/home';
+    case 'catalog':
+    case 'courses':
+      return '/courses';
+    case 'paths':
+      return '/paths';
+    case 'chat':
+      return '/chat';
+    case 'progress':
+      return '/progress';
+    case 'analytics':
+      return '/analytics';
+    case 'discussions':
+      return '/discussions';
+    case 'join-org':
+      return '/join-org';
+    default:
+      return '/home';
+  }
+};
+
+const resolveOrgLegacyPath = (splat: string | undefined): string => {
+  const parts = normalizeAliasPath(splat);
+  const [section, id, subRoute] = parts;
+
+  switch (section) {
+    case undefined:
+    case 'home':
+      return '/home';
+    case 'courses':
+      return '/courses';
+    case 'paths':
+      return '/paths';
+    case 'chat':
+      return '/chat';
+    case 'progress':
+      return '/progress';
+    case 'analytics':
+      return '/analytics';
+    case 'discussions':
+      return '/discussions';
+    case 'course': {
+      if (!id) return '/courses';
+      const tail = subRoute || 'home';
+      return `/course/${id}/${tail}`;
+    }
+    case 'admin': {
+      const adminTail = parts.slice(1).join('/');
+      return adminTail ? `/admin/${adminTail}` : '/admin/dashboard';
+    }
+    default:
+      return '/home';
+  }
+};
+
+function MeWorkspaceAlias() {
+  const location = useLocation();
+  const params = useParams();
+  const setWorkspace = useWorkspaceStore(state => state.setWorkspace);
+
+  useEffect(() => {
+    setWorkspace('personal', null);
+  }, [setWorkspace]);
+
+  const legacyPath = resolveMeLegacyPath(params['*']);
+  return <Navigate to={`${legacyPath}${location.search}`} replace />;
+}
+
+function OrgWorkspaceAlias() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = useParams();
+  const orgSlug = params.orgSlug || '';
+  const { uid, isAuthenticated } = useAuth();
+  const setWorkspace = useWorkspaceStore(state => state.setWorkspace);
+  const setCurrentOrg = useLMSStore(state => state.setCurrentOrg);
+  const setCurrentMember = useLMSStore(state => state.setCurrentMember);
+  const currentOrgSlug = useLMSStore(state => state.currentOrg?.slug);
+  const [validated, setValidated] = useState(false);
+  const [allowed, setAllowed] = useState(false);
+
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      if (!orgSlug || !isAuthenticated) {
+        if (!canceled) {
+          setAllowed(false);
+          setValidated(true);
+        }
+        return;
+      }
+      const access = await resolveWorkspaceAccess(orgSlug);
+      if (!canceled) {
+        setAllowed(access.canAccessOrg);
+        setValidated(true);
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [isAuthenticated, orgSlug]);
+
+  useEffect(() => {
+    if (!orgSlug) return;
+    setWorkspace('org', orgSlug);
+  }, [orgSlug, setWorkspace]);
+
+  useEffect(() => {
+    if (!orgSlug || currentOrgSlug === orgSlug) return;
+
+    let isCancelled = false;
+    (async () => {
+      try {
+        const org = await organizationService.getBySlug(orgSlug);
+        if (!org || isCancelled) return;
+        setCurrentOrg(org);
+
+        if (!uid) return;
+        const memberships = await userService.listMembershipsForUser(uid);
+        if (isCancelled) return;
+        const member = memberships.find(item => (item.orgId || item.odId) === org.id);
+        if (member) {
+          setCurrentMember(member);
+        }
+      } catch {
+        // Ignore context bootstrap failures; route guards will handle access.
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [uid, currentOrgSlug, orgSlug, setCurrentMember, setCurrentOrg]);
+
+  useEffect(() => {
+    if (!validated) return;
+    if (!allowed) {
+      navigate('/403', { replace: true, state: { reason: 'unauthorized', from: location.pathname } });
+    }
+  }, [allowed, validated, navigate, location.pathname]);
+
+  if (!validated) {
+    return <LoadingSpinner />;
+  }
+  if (!allowed) {
+    return null;
+  }
+
+  const legacyPath = resolveOrgLegacyPath(params['*']);
+  return <Navigate to={`${legacyPath}${location.search}`} replace />;
+}
+
+function WorkspaceResolverRoute() {
+  const navigate = useNavigate();
+  const { isAuthenticated, loading } = useAuth();
+  const { activeContext, activeOrgSlug, setWorkspace, setLastResolvedRoute } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!isAuthenticated) {
+      navigate('/welcome', { replace: true });
+      return;
+    }
+
+    let isCancelled = false;
+    const resolveWorkspace = async () => {
+      const onboarding = await onboardingService.getState();
+      if (!onboarding.completed) {
+        if (!isCancelled) {
+          navigate('/onboarding/profile', { replace: true });
+        }
+        return;
+      }
+
+      let targetRoute = '/me/home';
+
+      try {
+        const resolved = await workspaceService.resolve();
+        targetRoute = resolved.defaultRoute || '/me/home';
+        setWorkspace(resolved.activeContext, resolved.activeOrgSlug);
+      } catch {
+        if (activeContext === 'org' && activeOrgSlug) {
+          targetRoute = `/org/${activeOrgSlug}/home`;
+        } else if (activeContext === 'master') {
+          targetRoute = '/master/dashboard';
+        }
+      }
+
+      if (isCancelled) return;
+      setLastResolvedRoute(targetRoute);
+      navigate(targetRoute, { replace: true });
+    };
+
+    resolveWorkspace();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    activeContext,
+    activeOrgSlug,
+    isAuthenticated,
+    loading,
+    navigate,
+    setLastResolvedRoute,
+    setWorkspace,
+  ]);
+
+  return <LoadingSpinner />;
+}
+
+function ContextSwitchPage({ isDarkMode }: { isDarkMode: boolean }) {
+  const navigate = useNavigate();
+  const { isAuthenticated, loading } = useAuth();
+  const [workspaces, setWorkspaces] = useState<Array<{ slug: string; name: string; role: string }>>([]);
+  const [canAccessMaster, setCanAccessMaster] = useState(false);
+  const setWorkspace = useWorkspaceStore((state) => state.setWorkspace);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resolved = await workspaceService.resolve();
+        if (cancelled) return;
+        setWorkspaces(resolved.authorizedWorkspaces.organizations);
+        setCanAccessMaster(resolved.authorizedWorkspaces.master);
+      } catch {
+        if (!cancelled) {
+          setWorkspaces([]);
+          setCanAccessMaster(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  if (loading) return <LoadingSpinner />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  return (
+    <div className={`min-h-full p-6 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      <div className={`max-w-3xl mx-auto rounded-2xl border p-8 ${
+        isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-900'
+      }`}>
+        <h1 className="text-2xl font-semibold">Switch Workspace</h1>
+        <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+          Choose where you want to work right now.
+        </p>
+
+        <div className="mt-6 space-y-3">
+          <button
+            onClick={() => {
+              setWorkspace('personal', null);
+              navigate('/me/home');
+            }}
+            className={`w-full text-left rounded-xl border p-4 ${
+              isDarkMode ? 'border-gray-700 hover:bg-gray-700/40' : 'border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <p className="font-medium">Personal Workspace</p>
+            <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>/me/home</p>
+          </button>
+
+          {workspaces.map((org) => (
+            <button
+              key={org.slug}
+              onClick={() => {
+                setWorkspace('org', org.slug);
+                navigate(`/org/${org.slug}/home`);
+              }}
+              className={`w-full text-left rounded-xl border p-4 ${
+                isDarkMode ? 'border-gray-700 hover:bg-gray-700/40' : 'border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              <p className="font-medium">{org.name}</p>
+              <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Role: {org.role}</p>
+            </button>
+          ))}
+
+          {canAccessMaster && (
+            <button
+              onClick={() => {
+                setWorkspace('master', null);
+                navigate('/master/dashboard');
+              }}
+              className={`w-full text-left rounded-xl border p-4 ${
+                isDarkMode ? 'border-indigo-500/40 hover:bg-indigo-500/10' : 'border-indigo-200 hover:bg-indigo-50'
+              }`}
+            >
+              <p className="font-medium">Master Workspace</p>
+              <p className={`text-sm ${isDarkMode ? 'text-indigo-300' : 'text-indigo-700'}`}>/master/dashboard</p>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MasterWorkspacePage({ isDarkMode }: { isDarkMode: boolean }) {
+  const { isAuthenticated, loading, isMaster } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const setWorkspace = useWorkspaceStore((state) => state.setWorkspace);
+  const section = location.pathname.split('/').filter(Boolean)[1] || 'dashboard';
+  const [summary, setSummary] = useState<any | null>(null);
+  const [orgs, setOrgs] = useState<Array<{ id: string; name: string; slug: string }>>([]);
+  const [requests, setRequests] = useState<Array<{ id: string; name: string; slug: string; status: string }>>([]);
+  const [users, setUsers] = useState<Array<{ id: string; email: string }>>([]);
+  const [audit, setAudit] = useState<any | null>(null);
+
+  useEffect(() => {
+    setWorkspace('master', null);
+  }, [setWorkspace]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !isMaster) return;
+
+    let canceled = false;
+    (async () => {
+      try {
+        const [summaryData, orgList, requestList, userList, governanceAudit] = await Promise.all([
+          masterService.getSummary(),
+          masterService.listOrganizations(),
+          masterService.listOrganizationRequests(),
+          masterService.listUsers(),
+          masterService.getGovernanceAudit(),
+        ]);
+        if (canceled) return;
+        setSummary(summaryData);
+        setOrgs(orgList.map(item => ({ id: item.id, name: item.name, slug: item.slug })));
+        setRequests(requestList.map(item => ({ id: item.id, name: item.name, slug: item.slug, status: item.status })));
+        setUsers(userList.map(item => ({ id: item.id, email: item.email })));
+        setAudit(governanceAudit);
+      } catch {
+        if (!canceled) {
+          setSummary(null);
+        }
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, [isAuthenticated, isMaster]);
+
+  if (loading) return <LoadingSpinner />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isMaster) return <Navigate to="/403" replace />;
+
+  const sectionLabel = section.charAt(0).toUpperCase() + section.slice(1);
+
+  return (
+    <div className={`min-h-full p-6 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      <div className={`rounded-2xl border p-6 ${
+        isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-900'
+      }`}>
+        <p className="text-sm font-semibold uppercase tracking-wide text-indigo-500">Master Workspace</p>
+        <h1 className="mt-2 text-2xl font-bold">{sectionLabel}</h1>
+
+        {section === 'dashboard' && summary && (
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              ['Organizations', summary.organizations],
+              ['Users', summary.users],
+              ['Memberships', summary.active_memberships],
+              ['Completions 7d', summary.completions_last_7d],
+            ].map(([label, value]) => (
+              <div
+                key={String(label)}
+                className={`rounded-xl p-3 ${isDarkMode ? 'bg-gray-700/60' : 'bg-gray-100'}`}
+              >
+                <p className="text-xs uppercase tracking-wide">{label}</p>
+                <p className="text-xl font-semibold mt-1">{String(value)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {section === 'organizations' && (
+          <div className="mt-4 space-y-2">
+            {orgs.map((org) => (
+              <div
+                key={org.id}
+                className={`rounded-lg border p-3 flex items-center justify-between ${
+                  isDarkMode ? 'border-gray-700' : 'border-gray-200'
+                }`}
+              >
+                <div>
+                  <p className="font-medium">{org.name}</p>
+                  <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>/{org.slug}</p>
+                </div>
+                <button
+                  onClick={() => navigate(`/org/${org.slug}/home?viewAs=master`)}
+                  className={`px-3 py-1.5 rounded-lg text-sm ${
+                    isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-600 text-white'
+                  }`}
+                >
+                  View Org
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {section === 'users' && (
+          <div className="mt-4 space-y-2">
+            {users.slice(0, 40).map((user) => (
+              <div key={user.id} className={`rounded-lg border p-3 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <p>{user.email}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {section === 'billing' && (
+          <p className={`mt-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+            Billing controls are staged in master mode foundation.
+          </p>
+        )}
+
+        {section === 'compliance' && (
+          <div className="mt-4">
+            <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
+              Active Policies: {audit?.summary?.active_policies ?? 0}
+            </p>
+            <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
+              Open Bias Scans: {audit?.summary?.open_bias_scans ?? 0}
+            </p>
+          </div>
+        )}
+
+        {section === 'system' && (
+          <p className={`mt-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+            System health instrumentation is available via master reporting endpoints.
+          </p>
+        )}
+
+        {section === 'requests' && (
+          <div className="mt-4 space-y-2">
+            {requests.map((request) => (
+              <div key={request.id} className={`rounded-lg border p-3 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <p className="font-medium">{request.name}</p>
+                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  /{request.slug} · {request.status}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ============================================================================
 // RIGHT PANEL COMPONENT
@@ -927,6 +1409,16 @@ function AppContent() {
 
   // Not logged in - show legal pages or welcome screen
   if (!isAuthenticated) {
+    if (
+      currentRoute === '/app' ||
+      currentRoute === '/context-switch' ||
+      currentRoute.startsWith('/me/') ||
+      currentRoute.startsWith('/org/') ||
+      currentRoute.startsWith('/master/')
+    ) {
+      return <Navigate to="/welcome" replace />;
+    }
+
     if (isLegalRoute) {
       return (
         <div className={`min-h-screen flex flex-col ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -1277,10 +1769,32 @@ function RouterSync() {
     orgContext
   } = useAppContext();
   const { currentOrg, courses, learningPaths, loadCourses, loadLearningPaths, loadEnrollments } = useLMSStore();
+  const setWorkspace = useWorkspaceStore(state => state.setWorkspace);
+  const setLastResolvedRoute = useWorkspaceStore(state => state.setLastResolvedRoute);
 
   useEffect(() => {
     const path = location.pathname || '/';
     const searchParams = new URLSearchParams(location.search);
+
+    const canonicalWorkspace = parseWorkspaceFromPath(path);
+    if (canonicalWorkspace) {
+      setWorkspace(canonicalWorkspace.activeContext, canonicalWorkspace.activeOrgSlug);
+    } else if (path.startsWith('/admin') && currentOrg?.slug) {
+      setWorkspace('org', currentOrg.slug);
+    } else if (
+      path === '/' ||
+      path.startsWith('/home') ||
+      path.startsWith('/courses') ||
+      path.startsWith('/paths') ||
+      path.startsWith('/chat')
+    ) {
+      setWorkspace(currentOrg?.slug ? 'org' : 'personal', currentOrg?.slug ?? null);
+    }
+
+    if (path !== '/app' && path !== '/context-switch') {
+      setLastResolvedRoute(path);
+    }
+
     if (path !== currentRoute) {
       setRouteFromUrl(path);
     }
@@ -1301,6 +1815,10 @@ function RouterSync() {
     ]);
     if (path.startsWith('/admin')) {
       setContextFromUrl('admin');
+    } else if (path.startsWith('/master')) {
+      setContextFromUrl('admin');
+    } else if (path.startsWith('/org/')) {
+      setContextFromUrl('org');
     } else if (path.startsWith('/course/')) {
       const match = path.match(/^\/course\/([^/]+)(?:\/|$)/);
       const courseId = match?.[1];
@@ -1357,7 +1875,10 @@ function RouterSync() {
     loadCourses,
     loadLearningPaths,
     loadEnrollments,
-    orgContext
+    orgContext,
+    setWorkspace,
+    currentOrg?.slug,
+    setLastResolvedRoute
   ]);
 
   return null;
@@ -1381,6 +1902,25 @@ function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
     updateEnrollmentProgress
   } = useLMSStore();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAuthenticated) {
+      setOnboardingCompleted(null);
+      return;
+    }
+    setOnboardingCompleted(null);
+    (async () => {
+      const state = await onboardingService.getState();
+      if (!cancelled) {
+        setOnboardingCompleted(state.completed);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, currentRoute]);
 
   const loadAnnouncements = useCallback(async () => {
     if (!currentOrg) return;
@@ -1551,7 +2091,7 @@ function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
 
   const AuthRoutePage = ({ mode }: { mode: 'login' | 'register' }) => (
     isAuthenticated ? (
-      <Navigate to="/home" replace />
+      <Navigate to="/app" replace />
     ) : (
       <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-gray-950' : 'bg-gray-100'}`}>
         <AuthModal
@@ -1572,13 +2112,34 @@ function AppRoutes({ isDarkMode }: { isDarkMode: boolean }) {
     }
   }, [currentRoute, currentOrg, loadLearningPaths, loadCourses, loadEnrollments]);
 
+  const isOnboardingRoute = currentRoute.startsWith('/onboarding');
+  if (isAuthenticated && onboardingCompleted === false && !isOnboardingRoute) {
+    return <Navigate to="/onboarding/profile" replace />;
+  }
+
   return (
     <ErrorBoundary title="Application">
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
+          <Route path="/app" element={<WorkspaceResolverRoute />} />
+          <Route path="/context-switch" element={<ContextSwitchPage isDarkMode={isDarkMode} />} />
           <Route path="/login" element={<AuthRoutePage mode="login" />} />
           <Route path="/signup" element={<AuthRoutePage mode="register" />} />
+          <Route path="/403" element={<ForbiddenPage isDarkMode={isDarkMode} />} />
           <Route element={<LearnerRoute />}>
+            <Route path="/welcome" element={<Navigate to="/home" replace />} />
+            <Route path="/pricing" element={<Navigate to="/home" replace />} />
+            <Route path="/onboarding" element={<Navigate to="/onboarding/profile" replace />} />
+            <Route path="/onboarding/:step" element={<OnboardingFlowPage isDarkMode={isDarkMode} />} />
+            <Route element={<PersonalWorkspaceRoute />}>
+              <Route path="/me/*" element={<MeWorkspaceAlias />} />
+            </Route>
+            <Route element={<OrgWorkspaceRoute />}>
+              <Route path="/org/:orgSlug/*" element={<OrgWorkspaceAlias />} />
+            </Route>
+            <Route element={<MasterWorkspaceRoute />}>
+              <Route path="/master/*" element={<MasterWorkspacePage isDarkMode={isDarkMode} />} />
+            </Route>
             <Route path="/" element={<HomeDashboard isDarkMode={isDarkMode} />} />
             <Route path="/home" element={<HomeDashboard isDarkMode={isDarkMode} />} />
             <Route path="/courses" element={<MyCoursesPage isDarkMode={isDarkMode} />} />
