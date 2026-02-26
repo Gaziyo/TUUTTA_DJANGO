@@ -195,6 +195,30 @@ class TestOrganizationViewSet:
         assert approve.data["status"] == "approved"
         assert approve.data["created_org_slug"] == "requested-org"
 
+    def test_organization_request_approve_returns_409_for_existing_slug(self, auth_client, master_client, master_user):
+        Organization.objects.create(
+            name="Existing Org",
+            slug="existing-org",
+            plan="starter",
+            created_by=master_user,
+        )
+        create_request = auth_client.post(
+            reverse("organization-request-list"),
+            {"name": "Requested Existing", "slug": "existing-org", "plan": "starter"},
+            format="json",
+        )
+        assert create_request.status_code == 201
+
+        request_id = create_request.data["id"]
+        approve = master_client.post(
+            reverse("organization-request-approve", kwargs={"pk": request_id}),
+            {},
+            format="json",
+        )
+        assert approve.status_code == 409
+        assert approve.data["code"] == "organization_slug_conflict"
+        assert approve.data["existing_org_slug"] == "existing-org"
+
     def test_join_request_creation_for_non_member(self, api_client, org_admin):
         requester = User.objects.create_user(
             username="requester@example.com",

@@ -1,5 +1,6 @@
 import secrets
 
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
@@ -193,37 +194,59 @@ class OrganizationRequestViewSet(viewsets.ModelViewSet):
         org_request = self.get_object()
         if org_request.status != 'pending':
             return Response({'error': 'Only pending requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+        existing_org = Organization.objects.filter(slug=org_request.slug, is_active=True).first()
+        if existing_org:
+            return Response(
+                {
+                    'error': 'Organization slug already exists.',
+                    'code': 'organization_slug_conflict',
+                    'existing_org_slug': existing_org.slug,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
-        org = Organization.objects.create(
-            name=org_request.name,
-            slug=org_request.slug,
-            description=org_request.description,
-            plan=org_request.plan,
-            created_by=request.user,
-        )
-        OrganizationMember.objects.get_or_create(
-            organization=org,
-            user=org_request.requested_by,
-            defaults={'role': 'org_admin', 'status': 'active'},
-        )
-        create_audit_log(
-            org_id=str(org.id),
-            actor_id=str(request.user.id),
-            actor_name=request.user.email,
-            actor_type='admin',
-            action='organization.request.approved',
-            entity_type='organization_request',
-            entity_id=str(org_request.id),
-            target_type='organization',
-            target_id=str(org.id),
-            target_name=org.name,
-        )
-        org_request.status = 'approved'
-        org_request.reviewed_by = request.user
-        org_request.reviewed_at = timezone.now()
-        org_request.created_org = org
-        org_request.review_note = request.data.get('review_note', org_request.review_note)
-        org_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'created_org', 'review_note', 'updated_at'])
+        try:
+            with transaction.atomic():
+                org = Organization.objects.create(
+                    name=org_request.name,
+                    slug=org_request.slug,
+                    description=org_request.description,
+                    plan=org_request.plan,
+                    created_by=request.user,
+                )
+                OrganizationMember.objects.get_or_create(
+                    organization=org,
+                    user=org_request.requested_by,
+                    defaults={'role': 'org_admin', 'status': 'active'},
+                )
+                create_audit_log(
+                    org_id=str(org.id),
+                    actor_id=str(request.user.id),
+                    actor_name=request.user.email,
+                    actor_type='admin',
+                    action='organization.request.approved',
+                    entity_type='organization_request',
+                    entity_id=str(org_request.id),
+                    target_type='organization',
+                    target_id=str(org.id),
+                    target_name=org.name,
+                )
+                org_request.status = 'approved'
+                org_request.reviewed_by = request.user
+                org_request.reviewed_at = timezone.now()
+                org_request.created_org = org
+                org_request.review_note = request.data.get('review_note', org_request.review_note)
+                org_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'created_org', 'review_note', 'updated_at'])
+        except IntegrityError:
+            return Response(
+                {
+                    'error': 'Organization slug already exists.',
+                    'code': 'organization_slug_conflict',
+                    'existing_org_slug': org_request.slug,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         return Response(self.get_serializer(org_request).data)
 
     @action(detail=True, methods=['post'], url_path='reject')
