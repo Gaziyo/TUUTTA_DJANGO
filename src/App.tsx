@@ -545,8 +545,18 @@ function MasterWorkspacePage({ isDarkMode }: { isDarkMode: boolean }) {
       }
       await loadMasterData();
     } catch (error: any) {
-      const detail = error?.response?.data?.error || error?.response?.data?.detail || 'Failed to process request.';
-      setRequestActionError(String(detail));
+      const statusCode = error?.response?.status;
+      const payload = error?.response?.data;
+      const rawError = payload?.error;
+      const detail =
+        (typeof rawError === 'string' && rawError) ||
+        (typeof rawError?.detail === 'string' && rawError.detail) ||
+        (typeof payload?.detail === 'string' && payload.detail) ||
+        (typeof payload?.code === 'string' && payload.code) ||
+        (typeof error?.message === 'string' && error.message) ||
+        'Failed to process request.';
+      const message = statusCode ? `Request failed (${statusCode}): ${detail}` : String(detail);
+      setRequestActionError(message);
     } finally {
       setRequestActionId(null);
     }

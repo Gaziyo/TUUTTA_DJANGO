@@ -1,3 +1,4 @@
+import logging
 import secrets
 
 from django.db import IntegrityError, transaction
@@ -27,6 +28,15 @@ from .serializers import (
     TeamSerializer,
 )
 from apps.analytics.services import create_audit_log
+
+logger = logging.getLogger(__name__)
+
+
+def safe_create_audit_log(**kwargs):
+    try:
+        create_audit_log(**kwargs)
+    except Exception:
+        logger.exception('Audit log write failed; request flow continued.')
 
 
 def ensure_org_access(request, org_id):
@@ -93,7 +103,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
             user=self.request.user,
             defaults={'role': 'org_admin'},
         )
-        create_audit_log(
+        safe_create_audit_log(
             org_id=str(org.id),
             actor_id=str(self.request.user.id),
             actor_name=self.request.user.email,
@@ -219,7 +229,7 @@ class OrganizationRequestViewSet(viewsets.ModelViewSet):
                     user=org_request.requested_by,
                     defaults={'role': 'org_admin', 'status': 'active'},
                 )
-                create_audit_log(
+                safe_create_audit_log(
                     org_id=str(org.id),
                     actor_id=str(request.user.id),
                     actor_name=request.user.email,
@@ -313,7 +323,7 @@ class OrganizationJoinRequestViewSet(viewsets.ModelViewSet):
             user=join_request.requester,
             defaults={'role': 'learner', 'status': 'active'},
         )
-        create_audit_log(
+        safe_create_audit_log(
             org_id=str(org.id),
             actor_id=str(request.user.id),
             actor_name=request.user.email,
@@ -341,7 +351,7 @@ class OrganizationJoinRequestViewSet(viewsets.ModelViewSet):
         join_request.reviewed_by = request.user
         join_request.reviewed_at = timezone.now()
         join_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'updated_at'])
-        create_audit_log(
+        safe_create_audit_log(
             org_id=str(org.id),
             actor_id=str(request.user.id),
             actor_name=request.user.email,
@@ -372,7 +382,7 @@ class OrganizationInviteCodeViewSet(viewsets.ModelViewSet):
         provided_code = self.request.data.get('code')
         code = (provided_code or secrets.token_urlsafe(8)).replace('-', '').replace('_', '')[:20].upper()
         invite = serializer.save(organization=org, created_by=self.request.user, code=code, is_active=True)
-        create_audit_log(
+        safe_create_audit_log(
             org_id=str(org.id),
             actor_id=str(self.request.user.id),
             actor_name=self.request.user.email,
@@ -414,7 +424,7 @@ class InviteCodeRedeemView(generics.GenericAPIView):
             if invite.max_uses is not None and invite.used_count >= invite.max_uses:
                 invite.is_active = False
             invite.save(update_fields=['used_count', 'is_active', 'updated_at'])
-            create_audit_log(
+            safe_create_audit_log(
                 org_id=str(invite.organization_id),
                 actor_id=str(request.user.id),
                 actor_name=request.user.email,

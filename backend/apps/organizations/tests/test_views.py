@@ -219,6 +219,30 @@ class TestOrganizationViewSet:
         assert approve.data["code"] == "organization_slug_conflict"
         assert approve.data["existing_org_slug"] == "existing-org"
 
+    def test_organization_request_approve_succeeds_when_audit_log_fails(self, auth_client, master_client, monkeypatch):
+        from apps.organizations import views as organization_views
+
+        create_request = auth_client.post(
+            reverse("organization-request-list"),
+            {"name": "Audit Failure Org", "slug": "audit-failure-org", "plan": "starter"},
+            format="json",
+        )
+        assert create_request.status_code == 201
+
+        def _raise_audit_failure(**_kwargs):
+            raise RuntimeError("audit unavailable")
+
+        monkeypatch.setattr(organization_views, "create_audit_log", _raise_audit_failure)
+
+        request_id = create_request.data["id"]
+        approve = master_client.post(
+            reverse("organization-request-approve", kwargs={"pk": request_id}),
+            {},
+            format="json",
+        )
+        assert approve.status_code == 200
+        assert approve.data["status"] == "approved"
+
     def test_join_request_creation_for_non_member(self, api_client, org_admin):
         requester = User.objects.create_user(
             username="requester@example.com",
