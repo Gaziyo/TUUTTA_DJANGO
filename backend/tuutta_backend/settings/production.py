@@ -47,6 +47,9 @@ def _parse_origin_csv(value: str) -> list[str]:
 
 
 default_cors_origins = [
+    'https://tuutta.onrender.com',
+    'https://tuutta-frontend.onrender.com',
+    'https://tuutta.com',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
