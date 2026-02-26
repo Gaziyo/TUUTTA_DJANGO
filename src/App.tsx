@@ -467,13 +467,49 @@ function MasterWorkspacePage({ isDarkMode }: { isDarkMode: boolean }) {
   const section = location.pathname.split('/').filter(Boolean)[1] || 'dashboard';
   const [summary, setSummary] = useState<any | null>(null);
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string; slug: string }>>([]);
-  const [requests, setRequests] = useState<Array<{ id: string; name: string; slug: string; status: string }>>([]);
+  const [requests, setRequests] = useState<Array<{
+    id: string;
+    name: string;
+    slug: string;
+    plan: string;
+    status: string;
+    requestedByEmail: string;
+    createdOrgSlug: string;
+    createdAt: string;
+  }>>([]);
   const [users, setUsers] = useState<Array<{ id: string; email: string }>>([]);
   const [audit, setAudit] = useState<any | null>(null);
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [requestActionMessage, setRequestActionMessage] = useState('');
+  const [requestActionError, setRequestActionError] = useState('');
 
   useEffect(() => {
     setWorkspace('master', null);
   }, [setWorkspace]);
+
+  const loadMasterData = useCallback(async () => {
+    const [summaryData, orgList, requestList, userList, governanceAudit] = await Promise.all([
+      masterService.getSummary(),
+      masterService.listOrganizations(),
+      masterService.listOrganizationRequests(),
+      masterService.listUsers(),
+      masterService.getGovernanceAudit(),
+    ]);
+    setSummary(summaryData);
+    setOrgs(orgList.map(item => ({ id: item.id, name: item.name, slug: item.slug })));
+    setRequests(requestList.map(item => ({
+      id: item.id,
+      name: item.name,
+      slug: item.slug,
+      plan: item.plan,
+      status: item.status,
+      requestedByEmail: item.requested_by_email ?? '',
+      createdOrgSlug: item.created_org_slug ?? '',
+      createdAt: item.created_at,
+    })));
+    setUsers(userList.map(item => ({ id: item.id, email: item.email })));
+    setAudit(governanceAudit);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !isMaster) return;
@@ -481,19 +517,8 @@ function MasterWorkspacePage({ isDarkMode }: { isDarkMode: boolean }) {
     let canceled = false;
     (async () => {
       try {
-        const [summaryData, orgList, requestList, userList, governanceAudit] = await Promise.all([
-          masterService.getSummary(),
-          masterService.listOrganizations(),
-          masterService.listOrganizationRequests(),
-          masterService.listUsers(),
-          masterService.getGovernanceAudit(),
-        ]);
+        await loadMasterData();
         if (canceled) return;
-        setSummary(summaryData);
-        setOrgs(orgList.map(item => ({ id: item.id, name: item.name, slug: item.slug })));
-        setRequests(requestList.map(item => ({ id: item.id, name: item.name, slug: item.slug, status: item.status })));
-        setUsers(userList.map(item => ({ id: item.id, email: item.email })));
-        setAudit(governanceAudit);
       } catch {
         if (!canceled) {
           setSummary(null);
@@ -504,7 +529,28 @@ function MasterWorkspacePage({ isDarkMode }: { isDarkMode: boolean }) {
     return () => {
       canceled = true;
     };
-  }, [isAuthenticated, isMaster]);
+  }, [isAuthenticated, isMaster, loadMasterData]);
+
+  const handleRequestAction = useCallback(async (requestId: string, action: 'approve' | 'reject') => {
+    setRequestActionMessage('');
+    setRequestActionError('');
+    setRequestActionId(requestId);
+    try {
+      if (action === 'approve') {
+        await masterService.approveOrganizationRequest(requestId);
+        setRequestActionMessage('Organization request approved.');
+      } else {
+        await masterService.rejectOrganizationRequest(requestId);
+        setRequestActionMessage('Organization request rejected.');
+      }
+      await loadMasterData();
+    } catch (error: any) {
+      const detail = error?.response?.data?.error || error?.response?.data?.detail || 'Failed to process request.';
+      setRequestActionError(String(detail));
+    } finally {
+      setRequestActionId(null);
+    }
+  }, [loadMasterData]);
 
   if (loading) return <LoadingSpinner />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -600,14 +646,75 @@ function MasterWorkspacePage({ isDarkMode }: { isDarkMode: boolean }) {
 
         {section === 'requests' && (
           <div className="mt-4 space-y-2">
-            {requests.map((request) => (
-              <div key={request.id} className={`rounded-lg border p-3 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                <p className="font-medium">{request.name}</p>
-                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  /{request.slug} · {request.status}
-                </p>
-              </div>
-            ))}
+            {requestActionMessage && (
+              <p className={`rounded-lg border px-3 py-2 text-sm ${
+                isDarkMode ? 'border-emerald-700 bg-emerald-900/20 text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              }`}>
+                {requestActionMessage}
+              </p>
+            )}
+            {requestActionError && (
+              <p className={`rounded-lg border px-3 py-2 text-sm ${
+                isDarkMode ? 'border-rose-700 bg-rose-900/20 text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-700'
+              }`}>
+                {requestActionError}
+              </p>
+            )}
+            {requests.length === 0 && (
+              <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
+                No organization requests found.
+              </p>
+            )}
+            {requests.map((request) => {
+              const isPending = request.status === 'pending';
+              const isActing = requestActionId === request.id;
+              return (
+                <div key={request.id} className={`rounded-lg border p-3 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{request.name}</p>
+                      <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        /{request.slug} · {request.status} · plan: {request.plan}
+                      </p>
+                      {request.requestedByEmail && (
+                        <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          Requested by: {request.requestedByEmail}
+                        </p>
+                      )}
+                      {request.createdOrgSlug && (
+                        <p className={`text-xs mt-1 ${isDarkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                          Created org: /{request.createdOrgSlug}
+                        </p>
+                      )}
+                    </div>
+                    {isPending && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isActing}
+                          onClick={() => void handleRequestAction(request.id, 'approve')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                            isDarkMode ? 'bg-emerald-600/20 text-emerald-300 disabled:opacity-50' : 'bg-emerald-600 text-white disabled:opacity-50'
+                          }`}
+                        >
+                          {isActing ? 'Processing…' : 'Approve'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isActing}
+                          onClick={() => void handleRequestAction(request.id, 'reject')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                            isDarkMode ? 'bg-rose-600/20 text-rose-300 disabled:opacity-50' : 'bg-rose-600 text-white disabled:opacity-50'
+                          }`}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
