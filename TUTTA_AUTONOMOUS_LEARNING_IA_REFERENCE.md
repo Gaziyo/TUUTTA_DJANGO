@@ -836,6 +836,124 @@ Each phase must pass its exit gate before moving to the next phase.
 - **Release Recommendation:** Proceed with controlled rollout (`shadow -> limited -> full`) with kill-switch enabled.
 - **Final Owner Decision:** `APPROVE_FOR_CONTROLLED_RELEASE` (after live KPI baseline is captured).
 
+---
+
+## Delivery-Lead Implementation Plan (ASAP, Production-Ready)
+
+**Objective:** move from partial implementation to stable, measurable production operation with one critical path and no scope drift.
+
+### Priority Order (Single Critical Path)
+1. Stabilize auth/workspace/role routing (`personal -> org -> admin/master`).
+2. Make org request + approval deterministic and user-safe.
+3. Guarantee ELS access only when org role is valid (`org_admin`/`ld_manager`/`master`).
+4. Enforce canonical ADDIE run contract for all stages.
+5. Execute autonomous ADDIE with policy gates (`pass/exception_required/fail`).
+6. Make enrollment + delivery explicit from IMPLEMENT outputs.
+7. Make assessment + scoring + objective attainment deterministic.
+8. Close feedback loop (`evaluate -> analyze`) automatically.
+9. Harden reliability (idempotency, retry/backoff, DLQ, resume/replay safety).
+10. Harden governance (lineage, model/policy versioning, audit trace).
+11. Add observability + SLO + rollout guardrails.
+12. Launch with canary + rollback + hypercare.
+
+### Phase Plan (0–8)
+
+#### Phase 0 — Command Center + Scope Lock (Day 1)
+- [ ] Freeze non-critical scope and backlog.
+- [ ] Approve one critical-path board (owners, dates, dependencies).
+- [ ] Define production DoD and release gate criteria.
+- [ ] Define incident/rollback command chain.
+
+**Exit Criteria**
+- [ ] One signed execution board.
+- [ ] One signed Definition of Done.
+
+#### Phase 1 — Platform Stabilization (Day 2–4)
+- [ ] Fix auth/session/refresh edge cases.
+- [ ] Verify workspace resolver behavior for personal/org/master contexts.
+- [ ] Verify role mapping and admin route guard consistency.
+- [ ] Remove silent failure paths in org and ELS entry flow.
+
+**Exit Criteria**
+- [ ] User reaches correct workspace and route in all role/context cases.
+
+#### Phase 2 — Core Journey E2E Lock (Day 5–7)
+- [ ] Validate path: login -> org request -> master approve -> org workspace -> ELS.
+- [ ] Ensure all API errors are explicit and actionable.
+- [ ] Add integration tests for full journey.
+- [ ] Add regression tests for approval conflicts and retries.
+
+**Exit Criteria**
+- [ ] Core journey green in CI and staging.
+
+#### Phase 3 — Autonomous ADDIE Orchestrator v1 (Day 8–12)
+- [ ] Enforce run state machine (`queued` to `evaluate`).
+- [ ] Persist stage artifacts and canonical contracts.
+- [ ] Expose run timeline/status in ELS.
+- [ ] Ensure deterministic transition and recovery rules.
+
+**Exit Criteria**
+- [ ] One full autonomous run completes with all stage outputs persisted.
+
+#### Phase 4 — Human-by-Exception Governance (Day 13–15)
+- [ ] Enforce quality gates (confidence/risk/quality checks).
+- [ ] Route only failed/low-confidence/high-risk runs to exception queue.
+- [ ] Add reviewer actions (`approve/reject/override/resume`).
+- [ ] Add SLA timestamps/escalation fields.
+
+**Exit Criteria**
+- [ ] Autonomous-by-default confirmed; human only in exception queue.
+
+#### Phase 5 — Delivery + Enrollment + Assessment Runtime (Day 16–19)
+- [ ] Publish packages to runtime.
+- [ ] Execute enrollment rules and assignment activation.
+- [ ] Generate/serve multi-format assessments.
+- [ ] Score instantly and produce objective-attainment outcome package.
+
+**Exit Criteria**
+- [ ] Learner can complete full run and receive scored outcomes end-to-end.
+
+#### Phase 6 — Reliability + Recoverability Hardening (Day 20–22)
+- [ ] Enforce idempotency key on run trigger.
+- [ ] Add retry/backoff/DLQ with explicit error codes.
+- [ ] Implement resume/retry-stage/cancel controls safely.
+- [ ] Validate replay safety and duplicate suppression.
+
+**Exit Criteria**
+- [ ] Recoverability tested for stage failures without data corruption.
+
+#### Phase 7 — Observability + SLO + Cost Control (Day 23–24)
+- [ ] Add stage latency/failure/retry metrics.
+- [ ] Add quality/fairness/coverage metrics.
+- [ ] Add runtime outcome metrics and intervention rates.
+- [ ] Add token/compute cost-per-run telemetry and alerts.
+
+**Exit Criteria**
+- [ ] Dashboard + alerting supports on-call diagnosis in minutes.
+
+#### Phase 8 — Controlled Launch + Hypercare (Day 25–26)
+- [ ] Canary rollout (`shadow -> limited -> full`).
+- [ ] Enable feature flags and kill switch.
+- [ ] Publish runbook for incident, rollback, and exception operations.
+- [ ] Run 72-hour hypercare burn-down.
+
+**Exit Criteria**
+- [ ] Production rollout stable with rollback validated.
+
+### Production-Ready Gate (Must Pass)
+- [ ] Core journey success rate >= 99% in staging.
+- [ ] No open P0/P1 defects on critical path.
+- [ ] Addie run reliability/latency within agreed SLO.
+- [ ] Full lineage available for every autonomous run.
+- [ ] Rollback exercised successfully before full rollout.
+
+### Weekly Tracking Checklist
+- [ ] Week 1 complete (Phases 0–2)
+- [ ] Week 2 complete (Phases 3–5)
+- [ ] Week 3 complete (Phases 6–8)
+- [ ] Production gate passed
+- [ ] Controlled release approved
+
 
 
 # Tutta Autonomous Learning IA Reference
