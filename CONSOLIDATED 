@@ -1,3 +1,582 @@
+# Tutta Autonomous Learning Architecture — Index
+
+## What this index is for
+Use this file as the entry point for the autonomous learning architecture documentation set.
+
+---
+
+## Recommended Reading Order
+
+1. `TUTTA_AUTONOMOUS_LEARNING_EXECUTIVE_SUMMARY.md`
+   - Vision and business framing
+   - Operating principle
+   - Delivery overview and success targets
+
+2. `TUTTA_AUTONOMOUS_LEARNING_IA_REFERENCE.md`
+   - Core principles
+   - System logic
+   - ADDIE integration
+   - Final comprehensive IA v3
+   - API/events blueprint (high level)
+
+3. `TUTTA_AUTONOMOUS_LEARNING_DECISION_POLICY_APPENDIX.md`
+   - Enforceable risk tiers
+   - Approval matrix
+   - Guardrail rules
+   - Decision log contract
+
+4. `TUTTA_AUTONOMOUS_LEARNING_IA_EXECUTION_PLAN.md`
+   - Sprint-by-sprint delivery plan
+   - Backend/frontend ownership mapping
+   - Acceptance criteria
+   - Program-level success metrics
+
+---
+
+## Document Map
+
+- `TUTTA_AUTONOMOUS_LEARNING_EXECUTIVE_SUMMARY.md`
+  - Decision-maker and cross-functional overview
+
+- `TUTTA_AUTONOMOUS_LEARNING_IA_REFERENCE.md`
+  - Canonical architecture intent and IA
+
+- `TUTTA_AUTONOMOUS_LEARNING_DECISION_POLICY_APPENDIX.md`
+  - Authoritative runtime autonomy and approval policy
+
+- `TUTTA_AUTONOMOUS_LEARNING_IA_EXECUTION_PLAN.md`
+  - Practical implementation sequence mapped to current codebase
+
+---
+
+## Quick Start (Team Alignment)
+
+1. Align stakeholders on `Autonomous by default, Human by exception`.
+2. Align leadership outcomes and constraints from `...EXECUTIVE_SUMMARY.md`.
+3. Confirm IA boundaries in `...IA_REFERENCE.md`.
+4. Confirm decision controls from `...DECISION_POLICY_APPENDIX.md`.
+5. Kick off Sprint 1 from `...IA_EXECUTION_PLAN.md`.
+6. Track delivery against acceptance criteria each sprint.
+
+---
+
+## Update Rule
+
+When architecture decisions change:
+- Update IA first in `TUTTA_AUTONOMOUS_LEARNING_IA_REFERENCE.md`.
+- Update runtime decision rules in `TUTTA_AUTONOMOUS_LEARNING_DECISION_POLICY_APPENDIX.md`.
+- Then update rollout tasks in `TUTTA_AUTONOMOUS_LEARNING_IA_EXECUTION_PLAN.md`.
+- Then refresh leadership framing in `TUTTA_AUTONOMOUS_LEARNING_EXECUTIVE_SUMMARY.md`.
+- Keep this index stable unless document names/order changes.
+
+
+
+# Tutta Autonomous Learning — Decision Policy Appendix
+
+## Purpose
+This appendix is the single source of truth for runtime autonomy controls:
+- risk tiers,
+- approval requirements,
+- execution modes,
+- minimum audit contract.
+
+If this appendix changes, linked architecture documents must be updated in the same change set.
+
+---
+
+## Policy Version
+- `decision_policy_version`: `v1.0`
+- `effective_date`: `2026-02-25`
+
+---
+
+## Risk Tier Model
+
+| Tier | Scope and Risk | Minimum Confidence | Default Execution Mode |
+|---|---|---|---|
+| L0 | Low-impact learner personalization (nudge, content recommendation) | `>= 0.70` | `auto_execute` |
+| L1 | Learner-level path/remediation decisions with moderate impact | `>= 0.80` | `auto_execute` + notify |
+| L2 | Team/org impact decisions (bulk assignment, rubric overrides, policy tuning proposals) | `>= 0.85` | `propose_only` |
+| L3 | Compliance, legal, billing, or irreversible data/policy actions | `>= 0.90` | `manual_required` |
+
+---
+
+## Approval Matrix
+
+| Decision Type | Tier | Human Requirement |
+|---|---|---|
+| Adaptive recommendation and nudge | L0-L1 | No approval |
+| Learner remediation assignment | L1 | No approval |
+| Org-wide pathway assignment | L2 | Org admin/manager approval |
+| Competency policy change | L2-L3 | Master approval |
+| Compliance outcome declaration | L3 | Human required |
+| Data export/delete decisions | L3 | Human required |
+
+---
+
+## Guardrail Rules
+1. If confidence is below tier threshold, downgrade to `propose_only`.
+2. If evidence grounding is missing, block execution and raise exception.
+3. If policy conflict is detected, block execution and raise exception.
+4. In audit mode, all L2 decisions require explicit human approval.
+5. L3 decisions must never auto-execute.
+
+---
+
+## Execution Mode Definitions
+- `auto_execute`: execute immediately under policy constraints.
+- `propose_only`: generate recommended action and wait for approval.
+- `manual_required`: do not execute until authorized human resolves.
+
+---
+
+## Minimum Decision Log Contract
+Every runtime decision must emit:
+1. `decision_id`
+2. `decision_policy_version`
+3. `risk_tier`
+4. `execution_mode`
+5. `guardrail_status`
+6. `confidence`
+7. `rationale`
+8. `evidence_refs`
+9. `actor`
+10. `org_id`
+11. `timestamp`
+12. `final_status`
+
+---
+
+## KPI Alignment Notes
+- Autonomous Decision Rate denominator includes only L0-L2 decisions.
+- L3 decisions are excluded from autonomy denominator by policy.
+- Exception precision is measured against exceptions raised by guardrail triggers.
+
+
+
+# Tutta Autonomous Learning — Executive Summary
+
+## Vision
+Tutta operates as an **autonomous learning system** where AI handles learning design, delivery, assessment, and optimization end-to-end.
+
+Operating principle:
+- **Autonomous by default**
+- **Human by exception**
+
+Human-in-the-loop (manager/admin/SME) primarily provides knowledge sources. The system then does the rest.
+
+---
+
+## Problem We Are Solving
+Today, intelligent modules can feel fragmented when they behave as standalone tools.
+
+Target state:
+- AI Bot, Genie, ELS Studio, and Tutta Learning Engine act as **interfaces of one intelligence core**.
+- Learners receive seamless adaptive experiences and instant outcomes.
+- Human review is required only for low-confidence/high-risk decisions.
+
+---
+
+## System Model (Simple)
+
+### Part 1: AI/ML Learning Design System (Production Side)
+1. Ingest knowledge uploads
+2. Run ADDIE autonomously:
+   - Analyze
+   - Design
+   - Develop
+   - Implement
+   - Evaluate
+3. Generate and publish adaptive learning + assessments
+4. Continuously optimize policies/models
+
+### Part 2: User System (Receiving Side)
+1. Learner receives personalized learning
+2. Learner completes multimodal assessments
+3. System instantly evaluates and returns:
+   - performance results
+   - learning outcomes
+   - objective attainment
+
+---
+
+## Business Impact
+- Significant reduction in manual instructional setup
+- Faster time from knowledge upload to deployable learning package
+- More consistent quality and objective alignment
+- Better learner outcomes through real-time adaptation
+- Stronger compliance and auditability via decision traceability
+
+---
+
+## Governance Model
+- Humans are not data-entry operators.
+- Humans intervene only when:
+  - AI confidence is low
+  - action is high-risk/compliance-sensitive
+  - guardrails are violated
+
+All decisions remain traceable with rationale, evidence references, and policy/model version.
+Runtime approvals and autonomy boundaries are enforced by:
+- `TUTTA_AUTONOMOUS_LEARNING_DECISION_POLICY_APPENDIX.md`
+
+---
+
+## Delivery Plan (High-Level)
+Execution is defined across phased sprints:
+1. Unified orchestration spine
+2. Autonomous Analysis/Design
+3. Autonomous Develop/Implement
+4. Unified assessment runtime
+5. Exception-only governance
+6. Optimization and hardening
+
+Detailed tasks and acceptance criteria are defined in the execution plan document.
+
+---
+
+## Success Criteria
+Use measurable contracts so results are auditable:
+
+1. Manual Entry Reduction >= 80%
+   - Numerator: `baseline_manual_fields_per_publish_flow - current_manual_fields_per_publish_flow`
+   - Denominator: `baseline_manual_fields_per_publish_flow`
+   - Window: rolling 28 days
+
+2. Autonomous Decision Rate >= 90%
+   - Numerator: `count(decisions with execution_mode = auto_execute and final_status = executed)`
+   - Denominator: `count(all runtime decisions in L0-L2 tiers)`
+   - Exclusion: L3 decisions are excluded by policy from autonomy denominator
+   - Window: rolling 28 days
+
+3. Outcome Visibility Latency <= 5 seconds p95
+   - Measurement: `assessment_submission_timestamp -> objective_attainment_persisted_timestamp`
+   - Window: rolling 7 days
+
+4. Exception Precision >= 80%
+   - Numerator: `count(exceptions confirmed valid after review)`
+   - Denominator: `count(total exceptions raised)`
+   - Window: rolling 28 days
+
+---
+
+## Related Architecture Documents
+- `TUTTA_AUTONOMOUS_LEARNING_ARCHITECTURE_INDEX.md`
+- `TUTTA_AUTONOMOUS_LEARNING_IA_REFERENCE.md`
+- `TUTTA_AUTONOMOUS_LEARNING_DECISION_POLICY_APPENDIX.md`
+- `TUTTA_AUTONOMOUS_LEARNING_IA_EXECUTION_PLAN.md`
+
+
+
+
+# Tutta Autonomous Learning IA — Execution Plan
+
+## Goal
+Implement the autonomous, ADDIE-driven architecture where:
+- humans mainly upload knowledge,
+- AI designs/delivers/assesses automatically,
+- learners receive adaptive outcomes,
+- humans intervene only for exceptions.
+
+Risk and approval enforcement is defined in:
+- `TUTTA_AUTONOMOUS_LEARNING_DECISION_POLICY_APPENDIX.md` (authoritative policy source).
+
+---
+
+## Current Baseline (Already in place)
+- Week 1 core intelligence foundation implemented:
+  - weighted gap matrix, migration/backfill, non-surrogate GNN versioning.
+- Week 2 productization implemented:
+  - optimizer guardrails + evaluation artifacts,
+  - live learning-path/competency/remediation flows,
+  - ingest reliability hardening + explicit error codes + retries.
+
+Primary files already aligned:
+- `backend/apps/learning_intelligence/tasks.py`
+- `backend/apps/learning_intelligence/views.py`
+- `backend/apps/knowledge/services.py`
+- `src/services/learningPathService.ts`
+- `src/services/competencyService.ts`
+- `src/services/remediationService.ts`
+
+---
+
+## Delivery Model
+- Sprint length: 1 week
+- Cadence: backend + frontend + ML + QA in parallel
+- Definition of done per sprint:
+  - API contract stable
+  - tests green
+  - observability added
+  - rollback path documented
+
+---
+
+## Sprint 1 — Unified Orchestration Spine
+
+### Objectives
+- Create one orchestration path for all learning-intelligence actions.
+- Standardize event envelope and correlation IDs.
+
+### Backend
+- Add orchestrator service/module:
+  - `backend/apps/learning_intelligence/services.py` (or new `orchestrator.py`)
+- Add endpoint:
+  - `POST /api/v1/organizations/{orgId}/cognitive-orchestrator/execute`
+- Add canonical action dispatch for:
+  - recommend, remediate, unlock, nudge, assess.
+
+### Frontend
+- Add orchestrator client:
+  - `src/services/cognitiveOrchestratorService.ts`
+- Route AI Bot/Genie action triggers through orchestrator.
+
+### QA
+- Contract tests for orchestrator request/response.
+- Correlation ID propagation test.
+
+### Acceptance
+- 80%+ of adaptive actions originate from orchestrator endpoint.
+
+---
+
+## Sprint 2 — Autonomous ADDIE: Analysis + Design
+
+### Objectives
+- Remove manual field-heavy design setup.
+- Auto-infer objectives, audience, and blueprint from uploaded knowledge + system context.
+
+### Backend
+- Add design pipeline endpoints:
+  - `POST /api/v1/organizations/{orgId}/design/analyze`
+  - `POST /api/v1/organizations/{orgId}/design/generate-blueprint`
+- Auto-link:
+  - competency framework,
+  - Bloom targets,
+  - modality strategy.
+
+Files:
+- `backend/apps/knowledge/tasks.py`
+- `backend/apps/knowledge/services.py`
+- `backend/apps/learning_intelligence/tasks.py`
+
+### Frontend
+- ELS Studio flow:
+  - from “upload + one intent prompt” to generated blueprint.
+- Reduce required inputs to minimal fields.
+
+Files:
+- `src/services/els/*`
+- `src/components/*ELS*`
+
+### QA
+- Snapshot tests for generated blueprints.
+- Coverage for low-confidence fallback to exception queue.
+
+### Acceptance
+- Manager can generate blueprint without manual objective-by-objective form entry.
+
+---
+
+## Sprint 3 — Autonomous ADDIE: Develop + Implement
+
+### Objectives
+- Generate publishable learning packages and deploy automatically.
+
+### Backend
+- Add package generation and publish endpoints:
+  - `POST /api/v1/organizations/{orgId}/design/generate-content`
+  - `POST /api/v1/organizations/{orgId}/design/publish-package`
+- Persist package artifacts with version metadata.
+- Link runtime assignment in learning engine.
+
+Files:
+- `backend/apps/courses/models.py`
+- `backend/apps/courses/views.py`
+- `backend/apps/learning_intelligence/tasks.py`
+
+### Frontend
+- ELS publish workflow + preview.
+- Learning engine auto-assignment status UI.
+
+Files:
+- `src/services/els/*`
+- `src/services/learningPathService.ts`
+- `src/store/lmsStore.ts`
+
+### QA
+- Publish-to-assignment end-to-end test.
+- Regression tests for course/path APIs.
+
+### Acceptance
+- From knowledge upload to learner-visible assigned package in one continuous flow.
+
+---
+
+## Sprint 4 — Assessment Runtime Unification
+
+### Objectives
+- Unify multi-format assessment generation, delivery, scoring, and outcome writing.
+
+### Backend
+- Extend assessment runtime to support modality-specific scoring pipelines:
+  - reading/writing/listening/speaking.
+- Standardize outcome record schema:
+  - performance, objective attainment, competency progression.
+
+Files:
+- `backend/apps/assessments/*`
+- `backend/apps/learning_intelligence/*`
+- `backend/apps/analytics/*`
+
+### Frontend
+- Unified assessment renderer for multi-format items.
+- Immediate outcome visualization post-submit.
+
+Files:
+- `src/components/*Assessment*`
+- `src/services/assessmentService.ts`
+
+### QA
+- Deterministic scoring tests.
+- Objective attainment contract tests.
+
+### Acceptance
+- Outcome payload available within seconds of submission.
+
+---
+
+## Sprint 5 — Exception-Only Human Governance
+
+### Objectives
+- Move human role from operator to exception reviewer.
+
+### Backend
+- Add exception queue domain:
+  - low-confidence decisions,
+  - high-risk compliance actions,
+  - guardrail violations.
+- Add endpoints:
+  - `GET /api/v1/organizations/{orgId}/exceptions`
+  - `POST /api/v1/organizations/{orgId}/exceptions/{id}/resolve`
+
+Files:
+- `backend/apps/governance/*`
+- `backend/apps/learning_intelligence/views.py`
+
+### Frontend
+- Genie exception console with resolve/override workflows.
+
+Files:
+- `src/components/*Genie*`
+- `src/services/governanceService.ts`
+
+### QA
+- Verify normal actions bypass manual review.
+- Verify only flagged decisions hit queue.
+
+### Acceptance
+- 90%+ decisions fully autonomous (measured using the `Autonomous Decision Rate` contract in executive summary, excluding L3 decisions from denominator).
+
+---
+
+## Sprint 6 — Optimization, Experimentation, and Hardening
+
+### Objectives
+- Add continuous optimization with safe rollout.
+
+### Backend
+- Add A/B design experiment support for paths/items.
+- Extend optimizer reporting and auto rollback triggers.
+- Expand observability dashboards and decision trace logs.
+
+Files:
+- `backend/apps/learning_intelligence/tasks.py`
+- `backend/apps/analytics/*`
+- `backend/apps/governance/*`
+
+### Frontend
+- Genie experiment/readiness dashboards.
+- AI Bot explanation references (why this action now).
+
+Files:
+- `src/services/adaptivePolicyService.ts`
+- `src/services/gnnInsightService.ts`
+- `src/components/admin/*`
+
+### QA
+- Load/performance tests for orchestrator and runtime.
+- Chaos/failure-path tests for ingest and policy rollout.
+
+### Acceptance
+- Stable autonomous loop with measurable uplift and safe governance.
+
+---
+
+## Cross-Sprint Engineering Standards
+
+### API Contract Standard
+- Every decision endpoint returns:
+  - `decision_id`
+  - `policy_version`
+  - `risk_tier`
+  - `execution_mode` (`auto_execute`, `propose_only`, `manual_required`)
+  - `guardrail_status`
+  - `rationale`
+  - `actions[]`
+
+### Identifier and Routing Standard
+- Canonical API domains use `orgId` in path:
+  - `/api/v1/organizations/{orgId}/...`
+- User-facing workspace routing uses `orgSlug`:
+  - `/org/{orgSlug}/...`
+- Resolver normalizes slug to authorized organization context before API execution.
+- Event payloads and datastore records use `org_id` (never slug) as source of truth.
+
+### Event Standard
+- Every emitted event includes:
+  - `event_id`, `event_type`, `occurred_at`
+  - `org_id`, `actor`, `subject`
+  - `correlation_id`, `source_module`
+
+### Observability Standard
+- For every action, record:
+  - execution outcome,
+  - latency,
+  - confidence,
+  - downstream learning impact.
+
+---
+
+## Ownership Matrix
+
+### Backend
+- `backend/apps/learning_intelligence/*`: orchestration, policy, outcomes
+- `backend/apps/knowledge/*`: ingest, extraction, knowledge graph
+- `backend/apps/courses/*`: paths/packages/runtime mapping
+- `backend/apps/governance/*`: exception queue, guardrails, audit
+
+### Frontend
+- `src/services/*`: API adapters and contract mapping
+- `src/components/admin/*`: Genie + exception + governance UX
+- `src/components/*`: learner runtime, assessment rendering, outcome UX
+- `src/store/lmsStore.ts`: central orchestration wiring state
+
+### QA / Data / MLOps
+- API contract and E2E tests
+- policy evaluation reports
+- rollout safety + rollback checks
+
+---
+
+## Program-Level Success Criteria
+- Knowledge upload to first auto-generated learning package under 30 minutes.
+- 80%+ reduction in manual form entry for managers/admins.
+- 90%+ adaptive actions handled without human intervention.
+- Instant assessment outcome and objective attainment for learners.
+- Clear exception-only governance queue with full decision traceability.
+
+
 # Tutta Autonomous Learning IA Reference
 
 ## Purpose
@@ -1675,3 +2254,4 @@ Each phase must pass its exit gate before moving to the next phase.
 - **Operational Status:** Pending KPI verification in production against Go/No-Go thresholds.
 - **Release Recommendation:** Proceed with controlled rollout (`shadow -> limited -> full`) with kill-switch enabled.
 - **Final Owner Decision:** `APPROVE_FOR_CONTROLLED_RELEASE` (after live KPI baseline is captured).
+

@@ -4,6 +4,7 @@
 // ============================================================================
 
 import React, { useState } from 'react';
+import axios from 'axios';
 import {
   Building2,
   Search,
@@ -23,6 +24,51 @@ interface JoinOrganizationPageProps {
   isDarkMode: boolean;
 }
 
+const toSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
+const firstErrorMessage = (value: unknown): string | null => {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') return value[0];
+  return null;
+};
+
+const extractApiError = (error: unknown, fallback: string): string => {
+  if (axios.isAxiosError(error)) {
+    const payload = error.response?.data;
+    if (typeof payload === 'string' && payload.trim()) return payload;
+
+    if (payload && typeof payload === 'object') {
+      const body = payload as Record<string, unknown>;
+      const explicitError = firstErrorMessage(body.error);
+      if (explicitError) return explicitError;
+
+      const detail = firstErrorMessage(body.detail);
+      if (detail) return detail;
+
+      const slugError = firstErrorMessage(body.slug);
+      if (slugError) return `Organization slug: ${slugError}`;
+
+      const nameError = firstErrorMessage(body.name);
+      if (nameError) return `Organization name: ${nameError}`;
+    }
+
+    if (error.response?.status === 409) {
+      return 'Organization slug already exists. Use a different slug (example: roomi-learning-au).';
+    }
+    if (error.response?.status === 400) {
+      return 'Invalid organization request. Use a unique slug with lowercase letters and hyphens.';
+    }
+  }
+
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+};
+
 export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPageProps) {
   const { user } = useStore();
   const { joinOrg } = useAppContext();
@@ -37,6 +83,7 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [createOrgName, setCreateOrgName] = useState('');
   const [createOrgSlug, setCreateOrgSlug] = useState('');
+  const [isSlugDirty, setIsSlugDirty] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [creatingOrg, setCreatingOrg] = useState(false);
@@ -120,11 +167,15 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
       setCreateError('Please sign in to create an organization.');
       return;
     }
+    const slug = toSlug(createOrgSlug.trim() || createOrgName.trim());
+    if (!slug) {
+      setCreateError('Organization slug is required. Use lowercase letters, numbers, and hyphens.');
+      return;
+    }
     setCreateError(null);
     setCreateSuccess(null);
     setCreatingOrg(true);
     try {
-      const slug = createOrgSlug.trim() || createOrgName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       await organizationService.requestCreation({
         name: createOrgName.trim(),
         slug,
@@ -132,9 +183,10 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
       });
       setCreateOrgName('');
       setCreateOrgSlug('');
+      setIsSlugDirty(false);
       setCreateSuccess('Organization request submitted. A master user must approve it.');
     } catch (error) {
-      setCreateError((error as Error).message);
+      setCreateError(extractApiError(error, 'Unable to submit organization request.'));
     } finally {
       setCreatingOrg(false);
     }
@@ -206,7 +258,7 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
                 Create an organization
               </h2>
               <p className={`${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                You will become the organization admin and can create courses immediately.
+                You become the organization admin after master approval.
               </p>
             </div>
           </div>
@@ -219,7 +271,11 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
               <input
                 type="text"
                 value={createOrgName}
-                onChange={(e) => setCreateOrgName(e.target.value)}
+                onChange={(e) => {
+                  const nextName = e.target.value;
+                  setCreateOrgName(nextName);
+                  if (!isSlugDirty) setCreateOrgSlug(toSlug(nextName));
+                }}
                 placeholder="Acme Learning"
                 className={`w-full px-4 py-2 rounded-lg border ${
                   isDarkMode
@@ -235,7 +291,10 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
               <input
                 type="text"
                 value={createOrgSlug}
-                onChange={(e) => setCreateOrgSlug(e.target.value)}
+                onChange={(e) => {
+                  setIsSlugDirty(true);
+                  setCreateOrgSlug(toSlug(e.target.value));
+                }}
                 placeholder="acme-learning"
                 className={`w-full px-4 py-2 rounded-lg border ${
                   isDarkMode
@@ -243,6 +302,9 @@ export default function JoinOrganizationPage({ isDarkMode }: JoinOrganizationPag
                     : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
                 } focus:ring-2 focus:ring-emerald-500`}
               />
+              <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                Use lowercase letters, numbers, and hyphens only.
+              </p>
             </div>
           </div>
 

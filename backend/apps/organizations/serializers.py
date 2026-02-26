@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils.text import slugify
 from .models import (
     Organization,
     OrganizationMember,
@@ -59,9 +60,23 @@ class TeamSerializer(serializers.ModelSerializer):
 
 
 class OrganizationRequestSerializer(serializers.ModelSerializer):
+    slug = serializers.CharField(max_length=255)
     requested_by_email = serializers.EmailField(source='requested_by.email', read_only=True)
     reviewed_by_email = serializers.EmailField(source='reviewed_by.email', read_only=True)
     created_org_slug = serializers.CharField(source='created_org.slug', read_only=True)
+
+    def validate_slug(self, value):
+        normalized = slugify(value or '')
+        if not normalized:
+            raise serializers.ValidationError('Use lowercase letters, numbers, and hyphens only.')
+
+        existing_request = OrganizationRequest.objects.filter(slug=normalized)
+        if self.instance:
+            existing_request = existing_request.exclude(pk=self.instance.pk)
+        if existing_request.exists():
+            raise serializers.ValidationError('An organization request for this slug already exists.')
+
+        return normalized
 
     class Meta:
         model = OrganizationRequest
