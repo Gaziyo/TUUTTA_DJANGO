@@ -11,6 +11,8 @@ services:
     startCommand: gunicorn tuutta_backend.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --chdir backend
     healthCheckPath: /api/v1/health/
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
       - key: DJANGO_SETTINGS_MODULE
         value: tuutta_backend.settings.production
       - key: SECRET_KEY
@@ -49,6 +51,8 @@ services:
     buildCommand: pip install -r backend/requirements/production.txt
     startCommand: celery -A tuutta_backend worker -l info --concurrency 2 --chdir backend
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
       - key: DJANGO_SETTINGS_MODULE
         value: tuutta_backend.settings.production
       - key: SECRET_KEY

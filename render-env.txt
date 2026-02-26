@@ -8,6 +8,8 @@
 
 # --- REQUIRED ---
 
+PYTHON_VERSION=3.12.3
+
 DJANGO_SETTINGS_MODULE=tuutta_backend.settings.production
 
 # Generate a strong secret key — click "Generate" in Render dashboard
